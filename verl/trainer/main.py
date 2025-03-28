@@ -92,7 +92,6 @@ class Runner:
 def main():
     cli_args = OmegaConf.from_cli()
     default_config = OmegaConf.structured(PPOConfig())
-
     if hasattr(cli_args, "config"):
         config_path = cli_args.pop("config", None)
         file_config = OmegaConf.load(config_path)

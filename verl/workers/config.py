@@ -50,3 +50,4 @@ class WorkerConfig:
         self.ref.padding_free = self.actor.padding_free
         self.ref.ulysses_sequence_parallel_size = self.actor.ulysses_sequence_parallel_size
         self.ref.use_torch_compile = self.actor.use_torch_compile
+        
