@@ -13,5 +13,6 @@ python3 -m verl.trainer.main \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.rollout.enable_chunked_prefill=false \
     trainer.experiment_name=qwen2_5_vl_7b_geo_grpo \
-    trainer.n_gpus_per_node=4
+    trainer.n_gpus_per_node=4 \
+    raise-exception
     

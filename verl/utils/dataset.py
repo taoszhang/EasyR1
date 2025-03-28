@@ -121,6 +121,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         return len(self.dataset)
 
     def __getitem__(self, index):
+        breakpoint()
         row_dict: dict = self.dataset[index]
         prompt_str: str = row_dict[self.prompt_key]
         if self.system_prompt:

@@ -459,8 +459,8 @@ class RayPPOTrainer:
         if self.use_critic:
             self.critic_wg = all_wg["critic"]
             self.critic_wg.init_model()
-
         if self.use_reference_policy:
+            # 加载一次模型
             self.ref_policy_wg = all_wg["ref"]
             self.ref_policy_wg.init_model()
 
@@ -469,6 +469,7 @@ class RayPPOTrainer:
             self.rm_wg.init_model()
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
+        # 加载两次模型
         self.actor_rollout_wg = all_wg["actor_rollout"]
         self.actor_rollout_wg.init_model()
 
@@ -541,7 +542,6 @@ class RayPPOTrainer:
         self.logger = Tracker(loggers=self.config.trainer.logger, config=self.config.to_dict())
         self.global_step = 0
         val_metrics: Optional[Dict[str, Any]] = None
-
         # load checkpoint before doing anything
         self._load_checkpoint()
 
