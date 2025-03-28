@@ -604,7 +604,7 @@ class RayPPOTrainer:
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:
                             raise NotImplementedError("Reward model is not supported yet.")
-
+                        import ipdb; ipdb.set_trace()
                         # we combine with rule-based rm
                         reward_tensor, reward_metrics = self.reward_fn(batch)
                         batch.batch["token_level_scores"] = reward_tensor
