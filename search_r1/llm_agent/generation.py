@@ -10,7 +10,9 @@ from .tensor_helper import TensorHelper, TensorConfig
 #     save_trajectory_to_output,
 #     parse_llm_output
 # )
-from verl import DataProto
+# from verl import DataProto
+from verl.protocol import DataProto
+from verl.workers.fsdp_workers import FSDPWorker
 from verl.utils.tracking import Tracking
 import shutil
 import requests

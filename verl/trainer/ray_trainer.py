@@ -49,6 +49,7 @@ from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
 
+from search_r1.llm_agent.generation import LLMGenerationManager, GenerationConfig
 
 WorkerType = Type[Worker]
 
@@ -350,57 +351,203 @@ class RayPPOTrainer:
         samples = samples[: self.config.trainer.val_generations_to_log]
         self.logger.log_generation(samples, self.global_step)
 
+    # TODO 需要修改validate，同样用于适配search r1，可以先改这里
     def _validate(self) -> Dict[str, Any]:
         reward_tensor_lst = []
+        data_source_lst = []
+        import pdb; pdb.set_trace()
+        gen_config = GenerationConfig(
+            max_turns=self.config.retriever.max_turns, # NOTE:最大的检索调用次数
+            max_start_length=self.config.data.max_start_length, # TODO: 这个参数对应的应该是什么？
+            max_prompt_length=self.config.data.max_prompt_length,
+            max_response_length=self.config.data.max_response_length,
+            max_obs_length=self.config.data.max_obs_length, # TODO: 这个参数对应的应该是什么？
+            num_gpus=self.config.trainer.n_gpus_per_node,
+            no_think_rl=self.config.retriever.no_think_rl,
+            search_url = self.config.retriever.url,
+            topk = self.config.retriever.topk,
+        )
+
+        # Agent config preparation
+        generation_manager = LLMGenerationManager(
+            tokenizer=self.tokenizer,
+            actor_rollout_wg=self.actor_rollout_wg,
+            config=gen_config,
+            is_validation = True,
+        )
+
         # Lists to collect samples for the table
         sample_inputs, sample_outputs, sample_scores = [], [], []
         reward_metrics_lst = defaultdict(list)
-        for test_data in self.val_dataloader:
-            test_batch = DataProto.from_single_dict(test_data)
-            # Store original inputs
-            input_ids = test_batch.batch["input_ids"]
-            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
-            sample_inputs.extend(input_texts)
+        if not self.config.retriever.do_search:
+            for test_data in self.val_dataloader:
+                test_batch = DataProto.from_single_dict(test_data)
+                # Store original inputs
+                input_ids = test_batch.batch["input_ids"]
+                input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+                sample_inputs.extend(input_texts)
 
-            if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
-                test_gen_batch = test_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
-                )
-            else:
-                test_gen_batch = test_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=["raw_prompt_ids"],
-                )
+                if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                    )
+                else:
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        non_tensor_batch_keys=["raw_prompt_ids"],
+                    )
 
-            test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
-            test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
-            test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
-            test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
-            print("validation generation end")
+                test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
+                test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+                test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
+                test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
+                print("validation generation end")
 
-            # Store generated outputs
-            output_ids = test_output_gen_batch.batch["responses"]
-            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
-            sample_outputs.extend(output_texts)
+                # Store generated outputs
+                output_ids = test_output_gen_batch.batch["responses"]
+                output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+                sample_outputs.extend(output_texts)
 
-            test_batch = test_batch.union(test_output_gen_batch)
+                test_batch = test_batch.union(test_output_gen_batch)
 
-            # evaluate using reward_function
-            reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+                # evaluate using reward_function
+                reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
 
-            # Store scores
-            scores = reward_tensor.sum(-1).cpu().tolist()
-            sample_scores.extend(scores)
+                # Store scores
+                scores = reward_tensor.sum(-1).cpu().tolist()
+                sample_scores.extend(scores)
 
-            reward_tensor_lst.append(reward_tensor)
-            for key, value in reward_metrics.items():
-                reward_metrics_lst[key].extend(value)
+                reward_tensor_lst.append(reward_tensor)
+                for key, value in reward_metrics.items():
+                    reward_metrics_lst[key].extend(value)
+        else:
+            for batch_dict in self.val_dataloader:
+                timing_raw = {}
+                test_batch = DataProto.from_single_dict(batch_dict)
+                # Store original inputs
+                input_ids = test_batch.batch["input_ids"]
+                input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+                sample_inputs.extend(input_texts)
+
+                if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                    )
+                else:
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        non_tensor_batch_keys=["raw_prompt_ids"],
+                    )
+
+                test_gen_batch.meta_info = {
+                    'eos_token_id': self.tokenizer.eos_token_id,
+                    'pad_token_id': self.tokenizer.pad_token_id,
+                    'recompute_log_prob': False,
+                    'do_sample': False,
+                    'validate': True,
+                }
+                with _timer('step', timing_raw):
+                    first_input_ids = test_gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone()
+                    with _timer('gen', timing_raw):
+                        generation_manager.timing_raw = timing_raw
+                        final_gen_batch_output = generation_manager.run_llm_loop(
+                            gen_batch=test_gen_batch,
+                            initial_input_ids=first_input_ids,
+                        )
+                    
+                    test_batch = test_batch.union(final_gen_batch_output)
+                    
+                    for key in test_batch.batch.keys():
+                        test_batch.batch[key] = test_batch.batch[key].long()
+                    
+                    # evaluate using reward_function
+                    # for certain reward function (e.g. sandbox), the generation can overlap with reward
+                    try:
+                        # reward_tensor = self.val_reward_fn(test_batch)
+                        reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+                    except:
+                        print(test_batch)
+                        exit()
+
+                    reward_tensor_lst.append(reward_tensor)
+                    data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
+
+                # Store generated outputs
+                output_ids = test_output_gen_batch.batch["responses"]
+                output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+                sample_outputs.extend(output_texts)
+
+                test_batch = test_batch.union(test_output_gen_batch)
+
+                # evaluate using reward_function
+                reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+
+                # Store scores
+                scores = reward_tensor.sum(-1).cpu().tolist()
+                sample_scores.extend(scores)
+
+                reward_tensor_lst.append(reward_tensor)
+                for key, value in reward_metrics.items():
+                    reward_metrics_lst[key].extend(value)
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         return {"val/reward_score": reward_score, **val_reward_metrics}
+
+    # def _validate(self) -> Dict[str, Any]:
+    #     reward_tensor_lst = []
+    #     # Lists to collect samples for the table
+    #     sample_inputs, sample_outputs, sample_scores = [], [], []
+    #     reward_metrics_lst = defaultdict(list)
+    #     for test_data in self.val_dataloader:
+    #         test_batch = DataProto.from_single_dict(test_data)
+    #         # Store original inputs
+    #         input_ids = test_batch.batch["input_ids"]
+    #         input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+    #         sample_inputs.extend(input_texts)
+
+    #         if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
+    #             test_gen_batch = test_batch.pop(
+    #                 batch_keys=["input_ids", "attention_mask", "position_ids"],
+    #                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+    #             )
+    #         else:
+    #             test_gen_batch = test_batch.pop(
+    #                 batch_keys=["input_ids", "attention_mask", "position_ids"],
+    #                 non_tensor_batch_keys=["raw_prompt_ids"],
+    #             )
+
+    #         test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
+    #         test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+    #         test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
+    #         test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
+    #         print("validation generation end")
+
+    #         # Store generated outputs
+    #         output_ids = test_output_gen_batch.batch["responses"]
+    #         output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+    #         sample_outputs.extend(output_texts)
+
+    #         test_batch = test_batch.union(test_output_gen_batch)
+
+    #         # evaluate using reward_function
+    #         reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+
+    #         # Store scores
+    #         scores = reward_tensor.sum(-1).cpu().tolist()
+    #         sample_scores.extend(scores)
+
+    #         reward_tensor_lst.append(reward_tensor)
+    #         for key, value in reward_metrics.items():
+    #             reward_metrics_lst[key].extend(value)
+
+    #     self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+    #     reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
+    #     val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
+    #     return {"val/reward_score": reward_score, **val_reward_metrics}
 
     def init_workers(self) -> None:
         """Init resource pool and worker group"""
@@ -553,14 +700,35 @@ class RayPPOTrainer:
             if self.config.trainer.val_only:
                 return
 
+        gen_config = GenerationConfig(
+            max_turns=self.config.retriever.max_turns, # NOTE:最大的检索调用次数
+            max_start_length=self.config.data.max_start_length, # NOTE: 最大的起始token的长度
+            max_prompt_length=self.config.data.max_prompt_length,
+            max_response_length=self.config.data.max_response_length,
+            max_obs_length=self.config.data.max_obs_length, # NOTE: 跟环境的一次交互中最大的响应长度
+            num_gpus=self.config.trainer.n_gpus_per_node,
+            no_think_rl=self.config.retriever.no_think_rl,
+            search_url = self.config.retriever.url,
+            topk = self.config.retriever.topk,
+        )
+
+        # Agent config preparation
+        generation_manager = LLMGenerationManager(
+            tokenizer=self.tokenizer,
+            actor_rollout_wg=self.actor_rollout_wg,
+            config=gen_config,
+            is_validation = True,
+        )
+
         for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
             for batch_dict in tqdm(self.train_dataloader, desc="Running step", position=1):
                 self.global_step += 1
                 if self.global_step > self.training_steps:
                     break
-
+                # breakpoint()
                 metrics, timing_raw = {}, {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
+                # NOTE: 记得需要执行采样N次的操作
 
                 # pop those keys for generation
                 if "multi_modal_inputs" in batch.non_tensor_batch.keys():
@@ -575,36 +743,68 @@ class RayPPOTrainer:
                     )
 
                 with _timer("step", timing_raw):
-                    # generate a batch
-                    with _timer("gen", timing_raw):  # wg: worker group
-                        gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                    if not self.config.retriever.do_search:
+                        # 不做检索时的生成逻辑，一直到batch.union(gen_batch_output)
+                        # generate a batch
+                        with _timer("gen", timing_raw):  # wg: worker group
+                            gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
-                    if self.config.algorithm.adv_estimator == "remax":
-                        with _timer("gen_max", timing_raw):
-                            gen_baseline_batch = deepcopy(gen_batch)
-                            gen_baseline_batch.meta_info["temperature"] = 0.0
-                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
+                        if self.config.algorithm.adv_estimator == "remax":
+                            # NOTE: 这一段应该是没啥必要添加的，因为GRPO不采用remax,如果添加的话，需要在do_search的地方也添加
+                            with _timer("gen_max", timing_raw):
+                                gen_baseline_batch = deepcopy(gen_batch)
+                                gen_baseline_batch.meta_info["temperature"] = 0.0
+                                gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
-                            batch = batch.union(gen_baseline_output)
-                            reward_baseline_tensor, _ = self.reward_fn(batch)
-                            reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
+                                batch = batch.union(gen_baseline_output)
+                                reward_baseline_tensor, _ = self.reward_fn(batch)
+                                reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
 
-                            batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
-                            batch.batch["reward_baselines"] = reward_baseline_tensor
-                            del gen_baseline_batch, gen_baseline_output
+                                batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
+                                batch.batch["reward_baselines"] = reward_baseline_tensor
+                                del gen_baseline_batch, gen_baseline_output
 
-                    batch.non_tensor_batch["uid"] = np.array(
-                        [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
-                    )
-                    # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
-                    batch = batch.union(gen_batch_output)
+                        batch.non_tensor_batch["uid"] = np.array(
+                            [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
+                        )
+                        # repeat to align with repeated responses in rollout
+                        batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
+                        batch = batch.union(gen_batch_output)
+                    
+                    else:
+                        first_input_ids = gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone().long()
+                        with _timer('gen', timing_raw):
+                            generation_manager.timing_raw = timing_raw
+                            final_gen_batch_output = generation_manager.run_llm_loop(
+                                gen_batch=gen_batch,
+                                initial_input_ids=first_input_ids,
+                            )
 
+                        # final_gen_batch_output.batch.apply(lambda x: x.long(), inplace=True)
+                        for key in final_gen_batch_output.batch.keys():
+                            final_gen_batch_output.batch[key] = final_gen_batch_output.batch[key].long()
+                        # NOTE: 需要找到计算loss的地方，重新设置一下Mask的形状。
+                        # # 应该没必要在这里计算生成序列的概率，easy-r1会把计算log_probs的过程分为micro_batch_size_per_device_for_experience执行。
+                        # with torch.no_grad():
+                        #     try:
+                        #         output = self.actor_rollout_wg.compute_log_probs(final_gen_batch_output)
+                        #         final_gen_batch_output = final_gen_batch_output.union(output)
+                        #     except:
+                        #         print('############### here ###################')
+                        #         print(final_gen_batch_output)
+
+                        batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
+                                                                dtype=object)
+                                            
+                        # repeat to align with repeated responses in rollout
+                        batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
+                        batch = batch.union(final_gen_batch_output)
+                                                
                     # compute reward
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:
                             raise NotImplementedError("Reward model is not supported yet.")
-                        import ipdb; ipdb.set_trace()
+                        # import ipdb; ipdb.set_trace()
                         # we combine with rule-based rm
                         reward_tensor, reward_metrics = self.reward_fn(batch)
                         batch.batch["token_level_scores"] = reward_tensor

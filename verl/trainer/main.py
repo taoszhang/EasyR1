@@ -28,9 +28,9 @@ from .config import PPOConfig
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 # Add RAY_DEBUG environment variable to enable Ray Debugger
-ray.init(runtime_env={
-    "env_vars": {"RAY_DEBUG": "1"}, 
-})
+# ray.init(runtime_env={
+#     "env_vars": {"RAY_DEBUG": "1"}, 
+# })
 
 # please make sure main_task is not scheduled on head
 @ray.remote(num_cpus=1)
@@ -103,11 +103,10 @@ def main():
 
     ppo_config = OmegaConf.merge(default_config, cli_args)
     ppo_config = OmegaConf.to_object(ppo_config)
-
+    # import pdb; pdb.set_trace()
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
-
     runner = Runner.remote()
     ray.get(runner.run.remote(ppo_config))
 

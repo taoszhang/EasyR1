@@ -64,6 +64,16 @@ class AlgorithmConfig:
 
 
 @dataclass
+class RetrieverConfig:
+    url: str = ""
+    topk: int = 3
+    no_think_rl: bool = False
+    max_trun: int = 5
+    do_search: bool = True
+    start_state_marker: str = "<information>"
+    end_state_marker: str = "</information>"
+
+@dataclass
 class TrainerConfig:
     total_episodes: int = 10
     max_steps: Optional[int] = None
@@ -93,6 +103,7 @@ class PPOConfig:
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
 
     def post_init(self):
         self.worker.rollout.prompt_length = self.data.max_prompt_length
