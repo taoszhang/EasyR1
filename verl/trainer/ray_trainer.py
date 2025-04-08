@@ -252,8 +252,29 @@ class RayPPOTrainer:
         if config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by global batch size.")
 
-        if self.use_critic and config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
-            raise ValueError("Rollout batch size must be divisible by global batch size.")
+        if (
+            config.data.rollout_batch_size * config.worker.rollout.n
+        ) % config.worker.actor.micro_batch_size_per_device_for_experience != 0:
+            raise ValueError(
+                "Rollout batch size * rollout.n must be divisible by actor micro batch size for experience."
+            )
+
+        if self.use_critic:
+            if config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
+                raise ValueError("Rollout batch size must be divisible by critic global batch size.")
+
+            if (
+                config.data.rollout_batch_size * config.worker.rollout.n
+            ) % config.worker.critic.micro_batch_size_per_device_for_experience != 0:
+                raise ValueError(
+                    "Rollout batch size * rollout.n must be divisible by critic micro batch size for experience."
+                )
+
+        if (
+            config.algorithm.adv_estimator in (AdvantageEstimator.GRPO, AdvantageEstimator.RLOO)
+            and config.worker.rollout.n == 1
+        ):
+            raise ValueError("GRPO and RLOO algorithm need `config.worker.rollout.n > 1`.")
 
         self._create_dataloader()
 
@@ -658,7 +679,6 @@ class RayPPOTrainer:
                     break
                 metrics, timing_raw = {}, {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
-                # NOTE: 记得需要执行采样N次的操作
 
                 # pop those keys for generation
                 if "multi_modal_inputs" in batch.non_tensor_batch.keys():
@@ -671,13 +691,14 @@ class RayPPOTrainer:
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids"],
                     )
+
                 # 加入的指示meta_info的内容
                 gen_meta_info = {'n': self.config.worker.rollout.n,
                                  'temperature': self.config.worker.rollout.temperature}
                 gen_batch.meta_info.update(gen_meta_info)
+
                 with _timer("step", timing_raw):
                     if not self.config.retriever.do_search:
-                        # 不做检索时的生成逻辑，一直到batch.union(gen_batch_output)
                         # generate a batch
                         with _timer("gen", timing_raw):  # wg: worker group
                             gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
@@ -696,43 +717,25 @@ class RayPPOTrainer:
                                 batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
                                 batch.batch["reward_baselines"] = reward_baseline_tensor
                                 del gen_baseline_batch, gen_baseline_output
-
-                        batch.non_tensor_batch["uid"] = np.array(
-                            [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
-                        )
-                        # repeat to align with repeated responses in rollout
-                        batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
-                        batch = batch.union(gen_batch_output)
                     
                     else:
                         first_input_ids = gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone().long()
                         with _timer('gen', timing_raw):
                             generation_manager.timing_raw = timing_raw
-                            final_gen_batch_output = generation_manager.run_llm_loop(
+                            gen_batch_output = generation_manager.run_llm_loop(
                                 gen_batch=gen_batch,
                                 initial_input_ids=first_input_ids,
                             )
 
-                        # final_gen_batch_output.batch.apply(lambda x: x.long(), inplace=True)
-                        for key in final_gen_batch_output.batch.keys():
-                            final_gen_batch_output.batch[key] = final_gen_batch_output.batch[key].long()
-                        # NOTE: 需要找到计算loss的地方，重新设置一下Mask的形状。
-                        # # 应该没必要在这里计算生成序列的概率，easy-r1会把计算log_probs的过程分为micro_batch_size_per_device_for_experience执行。
-                        # with torch.no_grad():
-                        #     try:
-                        #         output = self.actor_rollout_wg.compute_log_probs(final_gen_batch_output)
-                        #         final_gen_batch_output = final_gen_batch_output.union(output)
-                        #     except:
-                        #         print('############### here ###################')
-                        #         print(final_gen_batch_output)
+                        for key in gen_batch_output.batch.keys():
+                            gen_batch_output.batch[key] = gen_batch_output.batch[key].long()
 
-                        batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
-                                                                dtype=object)
+                    batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
+                                                            dtype=object)      
+                    # repeat to align with repeated responses in rollout
+                    batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
+                    batch = batch.union(gen_batch_output)
                                             
-                        # repeat to align with repeated responses in rollout
-                        batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
-                        batch = batch.union(final_gen_batch_output)
-                                                
                     # compute reward
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:

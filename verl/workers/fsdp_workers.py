@@ -459,6 +459,8 @@ class FSDPWorker(Worker):
     def generate_sequences(self, prompts: DataProto):
         assert self._is_rollout
 
+        self.rollout_sharding_manager.no_sleep = prompts.meta_info.get('no_sleep', False)
+
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -484,6 +486,7 @@ class FSDPWorker(Worker):
             output = self.rollout_sharding_manager.postprocess_data(output)
 
         output = output.to("cpu")
+        dist.barrier()
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)

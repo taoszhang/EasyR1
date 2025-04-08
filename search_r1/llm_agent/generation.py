@@ -275,10 +275,10 @@ class LLMGenerationManager:
             for k, v in rollings.non_tensor_batch.items():
                 rollings_active[k] = v[active_mask]
             rollings_active = DataProto.from_single_dict(rollings_active, meta_info=rollings.meta_info)
-
+            # breakpoint()
             # gen_output = self._generate_with_gpu_padding(rollings_active)
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
-            # gen_batch.meta_info.update({'no_sleep': True})
+            gen_batch.meta_info.update({'no_sleep': True})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
             meta_info = gen_output.meta_info            
@@ -339,7 +339,7 @@ class LLMGenerationManager:
             rollings_active = DataProto.from_single_dict(rollings_active, meta_info=rollings.meta_info)
 
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
-            # gen_batch.meta_info.update({'no_sleep': False})
+            gen_batch.meta_info.update({'no_sleep': False})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
 
