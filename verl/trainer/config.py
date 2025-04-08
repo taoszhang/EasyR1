@@ -40,6 +40,9 @@ class DataConfig:
     image_key: str = "images"
     max_prompt_length: int = 512
     max_response_length: int = 512
+    max_start_length: int = 512
+    max_obs_length: int = 512
+    max_end_length: int = 512
     rollout_batch_size: int = 512
     val_batch_size: int = -1
     system_prompt: Optional[str] = None
@@ -68,7 +71,7 @@ class RetrieverConfig:
     url: str = ""
     topk: int = 3
     no_think_rl: bool = False
-    max_trun: int = 5
+    max_turns: int = 5
     do_search: bool = True
     start_state_marker: str = "<information>"
     end_state_marker: str = "</information>"

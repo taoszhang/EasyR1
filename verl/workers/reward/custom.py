@@ -20,7 +20,7 @@ import torch
 from transformers import PreTrainedTokenizer
 
 from ...protocol import DataProto
-from ...utils.reward_score import math_compute_score, r1v_compute_score
+from ...utils.reward_score import math_compute_score, r1v_compute_score, infoseek_compute_score
 
 
 class RewardScore(TypedDict):
@@ -36,12 +36,15 @@ class CustomRewardManager:
             self.compute_score: Callable[[str, str], RewardScore] = math_compute_score
         elif compute_score == "r1v":
             self.compute_score: Callable[[str, str], RewardScore] = r1v_compute_score
+        elif compute_score == "infoseek":
+            self.compute_score: Callable[[str, str], RewardScore] = infoseek_compute_score
         else:
             raise NotImplementedError()
 
     def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, Any]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
+        # breakpoint()
         for i in range(len(data)):
             data_item = data[i]  # DataProtoItem
             response_ids = data_item.batch["responses"]
@@ -51,8 +54,12 @@ class CustomRewardManager:
 
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
             ground_truth = data_item.non_tensor_batch["ground_truth"]
+            if 'problem_type' in data_item.non_tensor_batch:
+                problem_type = data_item.non_tensor_batch.get("problem_type", None)
+                score = self.compute_score(response_str, ground_truth, problem_type)
+            else:
+                score = self.compute_score(response_str, ground_truth)
 
-            score = self.compute_score(response_str, ground_truth)
             reward_tensor[i, valid_response_length - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)

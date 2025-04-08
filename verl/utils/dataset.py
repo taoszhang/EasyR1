@@ -28,7 +28,7 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
-
+import pandas as pd
 
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     tensors = defaultdict(list)
@@ -110,12 +110,18 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         else:
             data_split = "train"
 
+        if 'train' in data_path:
+            data_split = "train"
+        else:
+            data_split = "test" 
+
         if os.path.isdir(data_path):
-            self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
+            self.dataset = load_dataset("parquet", data_dir=data_path, split=data_split)
         elif os.path.isfile(data_path):
-            self.dataset = load_dataset("parquet", data_files=data_path, split="train")
+            self.dataset = load_dataset("parquet", data_files=data_path, split=data_split)
         else:  # remote dataset
             self.dataset = load_dataset(data_path, split=data_split)
+
 
     def __len__(self):
         return len(self.dataset)
@@ -174,4 +180,6 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict["position_ids"] = position_ids
         row_dict["raw_prompt_ids"] = self.tokenizer.encode(prompt, add_special_tokens=False)
         row_dict["ground_truth"] = row_dict.pop(self.answer_key)
+        if 'problem_type' in row_dict:
+            row_dict["problem_type"] = row_dict.pop("problem_type")
         return row_dict

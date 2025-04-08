@@ -349,13 +349,17 @@ class RayPPOTrainer:
     def _validate(self) -> Dict[str, Any]:
         reward_tensor_lst = []
         data_source_lst = []
-        import pdb; pdb.set_trace()
+        # Lists to collect samples for the table
+        sample_inputs, sample_outputs, sample_scores = [], [], []
+        reward_metrics_lst = defaultdict(list)
+
         gen_config = GenerationConfig(
             max_turns=self.config.retriever.max_turns, # NOTE:最大的检索调用次数
-            max_start_length=self.config.data.max_start_length, # TODO: 这个参数对应的应该是什么？
+            max_start_length=self.config.data.max_start_length, # TODO: 最大起始的prompt长度
             max_prompt_length=self.config.data.max_prompt_length,
             max_response_length=self.config.data.max_response_length,
-            max_obs_length=self.config.data.max_obs_length, # TODO: 这个参数对应的应该是什么？
+            max_obs_length=self.config.data.max_obs_length, # TODO: 每次检索或者是think的最大长度
+            max_end_length=self.config.data.max_end_length,
             num_gpus=self.config.trainer.n_gpus_per_node,
             no_think_rl=self.config.retriever.no_think_rl,
             search_url = self.config.retriever.url,
@@ -370,9 +374,6 @@ class RayPPOTrainer:
             is_validation = True,
         )
 
-        # Lists to collect samples for the table
-        sample_inputs, sample_outputs, sample_scores = [], [], []
-        reward_metrics_lst = defaultdict(list)
         if not self.config.retriever.do_search:
             for test_data in self.val_dataloader:
                 test_batch = DataProto.from_single_dict(test_data)
@@ -393,6 +394,7 @@ class RayPPOTrainer:
                     )
 
                 test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
+                # breakpoint()
                 test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
                 test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
                 test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
@@ -434,14 +436,16 @@ class RayPPOTrainer:
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids"],
                     )
-
-                test_gen_batch.meta_info = {
-                    'eos_token_id': self.tokenizer.eos_token_id,
-                    'pad_token_id': self.tokenizer.pad_token_id,
-                    'recompute_log_prob': False,
-                    'do_sample': False,
-                    'validate': True,
-                }
+                
+                # test_gen_batch.meta_info = {
+                #     'eos_token_id': self.tokenizer.eos_token_id,
+                #     'pad_token_id': self.tokenizer.pad_token_id,
+                #     'recompute_log_prob': False,
+                #     'do_sample': False,
+                #     'validate': True,
+                # }
+                test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
+                
                 with _timer('step', timing_raw):
                     first_input_ids = test_gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone()
                     with _timer('gen', timing_raw):
@@ -450,104 +454,34 @@ class RayPPOTrainer:
                             gen_batch=test_gen_batch,
                             initial_input_ids=first_input_ids,
                         )
-                    
+
+                    # Store generated outputs
+                    output_ids = final_gen_batch_output.batch["responses"]
+                    output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+                    sample_outputs.extend(output_texts)
+
                     test_batch = test_batch.union(final_gen_batch_output)
-                    
-                    for key in test_batch.batch.keys():
-                        test_batch.batch[key] = test_batch.batch[key].long()
-                    
+
                     # evaluate using reward_function
-                    # for certain reward function (e.g. sandbox), the generation can overlap with reward
-                    try:
-                        # reward_tensor = self.val_reward_fn(test_batch)
-                        reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
-                    except:
-                        print(test_batch)
-                        exit()
+                    reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+
+                    # Store scores
+                    scores = reward_tensor.sum(-1).cpu().tolist()
+                    sample_scores.extend(scores)
 
                     reward_tensor_lst.append(reward_tensor)
-                    data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
-
-                # Store generated outputs
-                output_ids = test_output_gen_batch.batch["responses"]
-                output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
-                sample_outputs.extend(output_texts)
-
-                test_batch = test_batch.union(test_output_gen_batch)
-
-                # evaluate using reward_function
-                reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
-
-                # Store scores
-                scores = reward_tensor.sum(-1).cpu().tolist()
-                sample_scores.extend(scores)
-
-                reward_tensor_lst.append(reward_tensor)
-                for key, value in reward_metrics.items():
-                    reward_metrics_lst[key].extend(value)
+                    for key, value in reward_metrics.items():
+                        reward_metrics_lst[key].extend(value)             
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         return {"val/reward_score": reward_score, **val_reward_metrics}
 
-    # def _validate(self) -> Dict[str, Any]:
-    #     reward_tensor_lst = []
-    #     # Lists to collect samples for the table
-    #     sample_inputs, sample_outputs, sample_scores = [], [], []
-    #     reward_metrics_lst = defaultdict(list)
-    #     for test_data in self.val_dataloader:
-    #         test_batch = DataProto.from_single_dict(test_data)
-    #         # Store original inputs
-    #         input_ids = test_batch.batch["input_ids"]
-    #         input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
-    #         sample_inputs.extend(input_texts)
-
-    #         if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
-    #             test_gen_batch = test_batch.pop(
-    #                 batch_keys=["input_ids", "attention_mask", "position_ids"],
-    #                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
-    #             )
-    #         else:
-    #             test_gen_batch = test_batch.pop(
-    #                 batch_keys=["input_ids", "attention_mask", "position_ids"],
-    #                 non_tensor_batch_keys=["raw_prompt_ids"],
-    #             )
-
-    #         test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
-    #         test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
-    #         test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
-    #         test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
-    #         print("validation generation end")
-
-    #         # Store generated outputs
-    #         output_ids = test_output_gen_batch.batch["responses"]
-    #         output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
-    #         sample_outputs.extend(output_texts)
-
-    #         test_batch = test_batch.union(test_output_gen_batch)
-
-    #         # evaluate using reward_function
-    #         reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
-
-    #         # Store scores
-    #         scores = reward_tensor.sum(-1).cpu().tolist()
-    #         sample_scores.extend(scores)
-
-    #         reward_tensor_lst.append(reward_tensor)
-    #         for key, value in reward_metrics.items():
-    #             reward_metrics_lst[key].extend(value)
-
-    #     self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
-    #     reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
-    #     val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
-    #     return {"val/reward_score": reward_score, **val_reward_metrics}
-
     def init_workers(self) -> None:
         """Init resource pool and worker group"""
         self.resource_pool_manager.create_resource_pool()
         self.resource_pool_to_cls = {pool: {} for pool in self.resource_pool_manager.resource_pool_dict.values()}
-
         # create actor and rollout
         if self.hybrid_engine:
             resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
@@ -611,6 +545,7 @@ class RayPPOTrainer:
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         # 加载两次模型
+        # breakpoint()
         self.actor_rollout_wg = all_wg["actor_rollout"]
         self.actor_rollout_wg.init_model()
 
@@ -693,17 +628,19 @@ class RayPPOTrainer:
             self.logger.log(data=val_metrics, step=self.global_step)
             if self.config.trainer.val_only:
                 return
-
+        # import ipdb; ipdb.set_trace()
         gen_config = GenerationConfig(
             max_turns=self.config.retriever.max_turns, # NOTE:最大的检索调用次数
             max_start_length=self.config.data.max_start_length, # NOTE: 最大的起始token的长度
             max_prompt_length=self.config.data.max_prompt_length,
             max_response_length=self.config.data.max_response_length,
             max_obs_length=self.config.data.max_obs_length, # NOTE: 跟环境的一次交互中最大的响应长度
+            max_end_length=self.config.data.max_end_length,
             num_gpus=self.config.trainer.n_gpus_per_node,
             no_think_rl=self.config.retriever.no_think_rl,
             search_url = self.config.retriever.url,
             topk = self.config.retriever.topk,
+            rollout_n = self.config.worker.rollout.n,
         )
 
         # Agent config preparation
@@ -711,7 +648,7 @@ class RayPPOTrainer:
             tokenizer=self.tokenizer,
             actor_rollout_wg=self.actor_rollout_wg,
             config=gen_config,
-            is_validation = True,
+            is_validation = False,
         )
 
         for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
@@ -719,7 +656,6 @@ class RayPPOTrainer:
                 self.global_step += 1
                 if self.global_step > self.training_steps:
                     break
-                # breakpoint()
                 metrics, timing_raw = {}, {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
                 # NOTE: 记得需要执行采样N次的操作
@@ -735,7 +671,10 @@ class RayPPOTrainer:
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids"],
                     )
-
+                # 加入的指示meta_info的内容
+                gen_meta_info = {'n': self.config.worker.rollout.n,
+                                 'temperature': self.config.worker.rollout.temperature}
+                gen_batch.meta_info.update(gen_meta_info)
                 with _timer("step", timing_raw):
                     if not self.config.retriever.do_search:
                         # 不做检索时的生成逻辑，一直到batch.union(gen_batch_output)
@@ -798,7 +737,6 @@ class RayPPOTrainer:
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:
                             raise NotImplementedError("Reward model is not supported yet.")
-                        # import ipdb; ipdb.set_trace()
                         # we combine with rule-based rm
                         reward_tensor, reward_metrics = self.reward_fn(batch)
                         batch.batch["token_level_scores"] = reward_tensor

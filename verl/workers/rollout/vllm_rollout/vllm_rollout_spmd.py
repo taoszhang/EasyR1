@@ -114,7 +114,7 @@ class vLLMRollout(BaseRollout):
         # roll back to previous sampling params
         for key, value in old_sampling_params_args.items():
             setattr(self.sampling_params, key, value)
-    # TODO: 结合这部分内容，修改LLM loop
+
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto) -> DataProto:
         # left-padded attention_mask

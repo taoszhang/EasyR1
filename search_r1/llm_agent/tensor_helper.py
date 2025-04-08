@@ -14,16 +14,26 @@ class TensorHelper:
         self.config = config
 
     def cut_to_effective_len(self, tensor_dict: Dict[str, torch.Tensor], 
-                            keys: List[str], cut_left: bool = True) -> Dict[str, torch.Tensor]:
+                            keys: List[str], 
+                            # non_tensor_keys: List[str] = None,
+                            cut_left: bool = True) -> Dict[str, torch.Tensor]: # 默认cut_left，那就应该是模型左padding?
         """Cut tensors to their effective length based on attention mask."""
+        """A new function has been added, and the part exceeding the maximum length is truncated."""
         effective_len = tensor_dict['attention_mask'].sum(dim=1).max()
         result = tensor_dict.copy()
+        # max_len = min(self.config.max_start_length, effective_len)
         
+        # for key in keys:
+        #     if cut_left:
+        #         result[key] = tensor_dict[key][:, -effective_len:]
+        #     else:
+        #         result[key] = tensor_dict[key][:, :effective_len]
         for key in keys:
             if cut_left:
                 result[key] = tensor_dict[key][:, -effective_len:]
             else:
                 result[key] = tensor_dict[key][:, :effective_len]
+
         return result
 
     def convert_pad_structure(self, tensor: torch.Tensor, pad_to_left: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
