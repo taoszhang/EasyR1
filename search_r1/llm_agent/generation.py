@@ -141,11 +141,6 @@ class LLMGenerationManager:
             ], axis=0)[-max_len+image_len-1:]
 
         return DataProto.from_single_dict(update_rolling_state, meta_info=rollings.meta_info)        
-        # return DataProto.from_dict({
-        #     'input_ids': new_input_ids[:, -max_len:],
-        #     'position_ids': new_position_ids[:, -max_len:],
-        #     'attention_mask': new_attention_mask[:, -max_len:]
-        # })
 
     def _info_masked_concatenate_with_padding(self, 
                 prompt: torch.Tensor, 
@@ -165,7 +160,7 @@ class LLMGenerationManager:
         
         concatenated = torch.cat(tensors, dim=1)
         concatenated_with_info = torch.cat(tensors_with_mask, dim=1)
-        mask = concatenated != pad_id if pad_to_left else concatenated == pad_id
+        mask = concatenated != pad_id if pad_to_left else concatenated == pad_id # 标记的是pad id的位置
         sorted_indices = mask.to(torch.int64).argsort(dim=1, stable=True)
         padded_tensor = concatenated.gather(1, sorted_indices)
         padded_tensor_with_info = concatenated_with_info.gather(1, sorted_indices)
@@ -177,21 +172,24 @@ class LLMGenerationManager:
                           next_obs_ids: torch.Tensor = None) -> Dict:
         """Update right side state."""
         if next_obs_ids != None:
-            responses = self.tensor_fn.concatenate_with_padding([
-                right_side['responses'],
-                cur_responses,
-                next_obs_ids
-            ], pad_to_left=False)
+            responses, responses_with_info_mask = self._info_masked_concatenate_with_padding(
+                    right_side['responses'],
+                    right_side['responses_with_info_mask'],
+                    cur_responses,
+                    next_obs_ids, 
+                    pad_to_left=False
+                )
         else:
-            responses = self.tensor_fn.concatenate_with_padding([
-                right_side['responses'],
-                cur_responses,
-            ], pad_to_left=False)
-        
+            responses, responses_with_info_mask = self._info_masked_concatenate_with_padding(
+                    right_side['responses'],
+                    right_side['responses_with_info_mask'],
+                    cur_responses,
+                    pad_to_left=False
+                )
         effective_len = self.tensor_fn.create_attention_mask(responses).sum(dim=1).max()
         max_len = min(self.config.max_prompt_length, effective_len)
         
-        return {'responses': responses[:, :max_len]}
+        return {'responses': responses[:, :max_len], 'responses_with_info_mask': responses_with_info_mask[:, :max_len]}
 
     def _generate_with_gpu_padding(self, active_batch: DataProto) -> DataProto:
         """
@@ -244,75 +242,79 @@ class LLMGenerationManager:
         padded_output.batch = trimmed_batch
         return padded_output
 
+    def active_rollings(self, rollings: DataProto, active_mask: torch.Tensor) -> DataProto:
+        rollings_active = {}
+        for k, v in rollings.batch.items():
+            rollings_active[k] = v[active_mask]
+        for k, v in rollings.non_tensor_batch.items():
+            rollings_active[k] = v[active_mask]
+        return DataProto.from_single_dict(rollings_active, meta_info=rollings.meta_info)
+
     def run_llm_loop(self, gen_batch, initial_input_ids: torch.Tensor) -> Tuple[Dict, Dict]:
         """Run main LLM generation loop."""
         original_left_side = {'input_ids': initial_input_ids[:, -self.config.max_prompt_length:]}
-        original_right_side = {'responses': initial_input_ids[:, []]} # 生成一个空响应
-        
+        original_right_side = {'responses': initial_input_ids[:, []], 'responses_with_info_mask': initial_input_ids[:, []]}
+        if not self.is_validation:
+            original_left_side['input_ids'] = original_left_side['input_ids'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
+            original_right_side['responses'] = original_right_side['responses'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
+            original_right_side['responses_with_info_mask'] = original_right_side['responses_with_info_mask'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
+
         active_mask = torch.ones(gen_batch.batch['input_ids'].shape[0], dtype=torch.bool)
-        active_num_list = [active_mask.sum().item()] # 只有一个值的列表
-        rollings = gen_batch # 这里是原始的，没有截断之前的batch
-        
+        turns_stats = torch.ones(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
+        valid_action_stats = torch.zeros(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
+        valid_search_stats = torch.zeros(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
+        active_num_list = [active_mask.sum().item() * self.config.rollout_n]
+        rollings = gen_batch
+
         # Main generation loop
-        # breakpoint()
         for step in range(self.config.max_turns):
             if not active_mask.sum():
                 break
-            # 根据注意力掩码进行裁剪, 去掉padding部分的内容
+            # 根据注意力掩码进行裁剪, 去掉多余的padding部分的内容
             rollings.batch = self.tensor_fn.cut_to_effective_len(
                 rollings.batch,
                 keys=['input_ids', 'attention_mask', 'position_ids'],
             )
-            
-            # gen_output = self.actor_rollout_wg.generate_sequences(rollings)  去除掉没用的样本？
-            # rollings_active = DataProto.from_dict({
-            #     k: v[active_mask] for k, v in rollings.batch.items()
-            # })
-            # NOTE: 这里添加上non_tensor_keys的处理，再输入_generate_with_gpu_padding中
-            rollings_active = {}
-            for k, v in rollings.batch.items():
-                rollings_active[k] = v[active_mask]
-            for k, v in rollings.non_tensor_batch.items():
-                rollings_active[k] = v[active_mask]
-            rollings_active = DataProto.from_single_dict(rollings_active, meta_info=rollings.meta_info)
+            rollings_active = self.active_rollings(rollings, active_mask)
 
             # gen_output = self._generate_with_gpu_padding(rollings_active)
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
             gen_batch.meta_info.update({'no_sleep': True})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
+            
             meta_info = gen_output.meta_info            
             responses_ids, responses_str = self._postprocess_responses(gen_output.batch['responses'])  # 取response</search>或</answer>前的内容，相当于截断，截断</search>优先
-            
+
             if step == 0 and not self.is_validation:
-                # 在第一次采样之后，对activate_mask同样进行拓展
+                rollings = rollings.repeat(repeat_times=self.config.rollout_n, interleave=True)
                 active_mask = active_mask.repeat_interleave(repeats=self.config.rollout_n, dim=0)
+                # NOTE：这个方法应该是控制训练和测试的时候，每次应该rollout几次的关键！！！
+                rollings.meta_info['n'] = 1
+
             # 这里会将rollings和rollings_active对齐
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)
 
             # Execute in environment and process observations 这里分为三种类型，search, answer, invalid，如果是invalid，则接上一段prompt然后再次执行生成，只有answer对应的内容，修改为done
-            next_obs, dones = self.execute_predictions(
+            next_obs, dones, valid_action, is_search = self.execute_predictions(
                 responses_str, self.tokenizer.pad_token, active_mask
-            )
-            
+            )            
+
             curr_active_mask = torch.tensor([not done for done in dones], dtype=torch.bool)
             active_mask = active_mask * curr_active_mask
             active_num_list.append(active_mask.sum().item())
+            turns_stats[curr_active_mask] += 1
+            valid_action_stats += torch.tensor(valid_action, dtype=torch.int)
+            valid_search_stats += torch.tensor(is_search, dtype=torch.int)
 
-            next_obs_ids = self._process_next_obs(next_obs) # 编码得到ids
-            # Update states
-            if step == 0 and not self.is_validation:
-                rollings = rollings.repeat(repeat_times=self.config.rollout_n, interleave=True)
-                original_right_side['responses'] = original_right_side['responses'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
-                # NOTE：这个方法应该是控制训练和测试的时候，每次应该rollout几次的关键！！！
-                rollings.meta_info['n'] = 1
+            next_obs_ids = self._process_next_obs(next_obs)
             
+            # Update states  
             rollings = self._update_rolling_state(
                 rollings,
                 responses_ids,
                 next_obs_ids
             )
-            # 这里是只取response部分的操作
             original_right_side = self._update_right_side( 
                 original_right_side,
                 responses_ids,
@@ -326,17 +328,7 @@ class LLMGenerationManager:
                 keys=['input_ids', 'attention_mask', 'position_ids']
             )
 
-            # gen_output = self.actor_rollout_wg.generate_sequences(rollings)
-            # rollings_active = DataProto.from_dict({
-            #     k: v[active_mask] for k, v in rollings.batch.items()
-            # })            
-            # gen_output = self._generate_with_gpu_padding(rollings_active)
-            rollings_active = {}
-            for k, v in rollings.batch.items():
-                rollings_active[k] = v[active_mask]
-            for k, v in rollings.non_tensor_batch.items():
-                rollings_active[k] = v[active_mask]
-            rollings_active = DataProto.from_single_dict(rollings_active, meta_info=rollings.meta_info)
+            rollings_active = self.active_rollings(rollings, active_mask)
 
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
             gen_batch.meta_info.update({'no_sleep': False})
@@ -348,13 +340,15 @@ class LLMGenerationManager:
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)
 
             # # Execute in environment and process observations
-            _, dones = self.execute_predictions(
+            _, dones, valid_action, is_search = self.execute_predictions(
                 responses_str, self.tokenizer.pad_token, active_mask, do_search=False
             )
 
             curr_active_mask = torch.tensor([not done for done in dones], dtype=torch.bool)
             active_mask = active_mask * curr_active_mask
             active_num_list.append(active_mask.sum().item())
+            valid_action_stats += torch.tensor(valid_action, dtype=torch.int)
+            valid_search_stats += torch.tensor(is_search, dtype=torch.int)
 
             original_right_side = self._update_right_side(
                 original_right_side,
@@ -362,9 +356,12 @@ class LLMGenerationManager:
             )
 
         # original_left side就是最开始的输出，original_right_side是在每次只取search或者是answer之前的内容，拼接得到的输出
+        meta_info['turns_stats'] = turns_stats.tolist()
+        meta_info['active_mask'] = active_mask.tolist()
+        meta_info['valid_action_stats'] = valid_action_stats.tolist()
+        meta_info['valid_search_stats'] = valid_search_stats.tolist()
+        
         print("ACTIVE_TRAJ_NUM:", active_num_list)
-        if not self.is_validation:
-            original_left_side['input_ids'] = original_left_side['input_ids'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
         return self._compose_final_output(original_left_side, original_right_side, meta_info)
 
     def _compose_final_output(self, left_side: Dict,
@@ -376,6 +373,7 @@ class LLMGenerationManager:
         final_output['prompts'] = left_side['input_ids']
 
         # 对于right_side['responses']，如果超过max_end_length，则进行裁剪，否则pad到max_end_length
+        assert final_output['responses_with_info_mask'].shape[1] == final_output['responses'].shape[1]
         if final_output['responses'].shape[1] > self.config.max_end_length:
             final_output['responses'] = final_output['responses'][:, :self.config.max_end_length]
         elif final_output['responses'].shape[1] < self.config.max_end_length:
@@ -389,6 +387,10 @@ class LLMGenerationManager:
                 final_output['responses'],
                 padded_responses
             ], dim=1)
+            final_output['responses_with_info_mask'] = torch.cat([
+                final_output['responses_with_info_mask'],
+                padded_responses
+            ], dim=1)
         
         # Combine input IDs
         final_output['input_ids'] = torch.cat([
@@ -396,13 +398,20 @@ class LLMGenerationManager:
             # right_side['responses']
             final_output['responses'],
         ], dim=1)
-        
+
         # Create attention mask and position ids
         final_output['attention_mask'] = torch.cat([
             self.tensor_fn.create_attention_mask(left_side['input_ids']),
             self.tensor_fn.create_attention_mask(final_output['responses'])
         ], dim=1)
-        
+        # responses_with_info_mask是对于ret info进行mask的responses
+        # NOTE: 目前这个mask仅作用于advantage计算，不直接作用于actor的更新
+        final_output['responses_mask_info'] = self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
+        # final_output['info_mask'] = torch.cat([
+        #     self.tensor_fn.create_attention_mask(left_side['input_ids']),
+        #     self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
+        # ], dim=1)
+
         final_output['position_ids'] = self.tensor_fn.create_position_ids(
             final_output['attention_mask']
         )
@@ -429,8 +438,8 @@ class LLMGenerationManager:
         Returns:
             List of observation strings
         """
-        cur_actions, contents = self.postprocess_predictions(predictions) # 查看是不是有search或者answer两种类型，并且找到其中的内容
-        next_obs, dones = [], []
+        cur_actions, contents = self.postprocess_predictions(predictions)
+        next_obs, dones, valid_action, is_search = [], [], [], []
         
         search_queries = [content for action, content in zip(cur_actions, contents) if action == 'search']
         if do_search:
@@ -444,22 +453,30 @@ class LLMGenerationManager:
             if not active:
                 next_obs.append('')
                 dones.append(1)
+                valid_action.append(0)
+                is_search.append(0)
             else:
                 if action == 'answer':
                     next_obs.append('')
                     dones.append(1)
+                    valid_action.append(1)
+                    is_search.append(0)
                 elif action == 'search':
                     next_obs.append(f'\n\n<information>{search_results.pop(0).strip()}</information>\n\n')
                     dones.append(0)
+                    valid_action.append(1)
+                    is_search.append(1)
                 else:
                     next_obs.append(f'\nMy previous action is invalid. \
 If I want to search, I should put the query between <search> and </search>. \
 If I want to give the final answer, I should put the answer between <answer> and </answer>. Let me try again.\n')
                     dones.append(0)
+                    valid_action.append(0)
+                    is_search.append(0)
             
         assert len(search_results) == 0
             
-        return next_obs, dones
+        return next_obs, dones, valid_action, is_search
 
     def postprocess_predictions(self, predictions: List[Any]) -> Tuple[List[int], List[bool]]:
         """

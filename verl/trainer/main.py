@@ -28,9 +28,9 @@ from .config import PPOConfig
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 # Add RAY_DEBUG environment variable to enable Ray Debugger
-# ray.init(runtime_env={
-#     "env_vars": {"RAY_DEBUG": "1"}, 
-# })
+ray.init(runtime_env={
+    "env_vars": {"RAY_DEBUG": "1"}, 
+})
 
 # please make sure main_task is not scheduled on head
 @ray.remote(num_cpus=1)

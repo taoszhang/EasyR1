@@ -15,8 +15,8 @@
 FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
-
 import os
+import gc
 import uuid
 from collections import defaultdict
 from contextlib import contextmanager
@@ -129,7 +129,9 @@ class ResourcePoolManager:
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penalty="kl"):
     token_level_scores = data.batch["token_level_scores"]
     batch_size = data.batch.batch_size[0]
-    response_mask = data.batch["response_mask"]
+    # breakpoint()
+    # response_mask = data.batch["response_mask"]
+    response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
 
     # compute kl between ref_policy and current policy
     if "ref_log_probs" in data.batch.keys():
@@ -157,7 +159,8 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 
 def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
     token_level_rewards = data.batch["token_level_rewards"]
-    response_mask = data.batch["response_mask"]
+    # response_mask = data.batch["response_mask"]
+    response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
     index = data.non_tensor_batch["uid"]
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch["values"]
@@ -733,13 +736,14 @@ class RayPPOTrainer:
                     # repeat to align with repeated responses in rollout
                     batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
-                                            
+                    # breakpoint()
                     # compute reward
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:
                             raise NotImplementedError("Reward model is not supported yet.")
                         
                         # we combine with rule-based rm
+                        # reward tensor的形状与responses_id相同，只在valid_response_length这个位置做一个分数的标记。
                         reward_tensor, reward_metrics = self.reward_fn(batch)
                         batch.batch["token_level_scores"] = reward_tensor
                         reward_metrics = {
@@ -805,7 +809,7 @@ class RayPPOTrainer:
 
                         actor_metrics = reduce_metrics(actor_output.non_tensor_batch)
                         metrics.update(actor_metrics)
-
+                    
                     # validate
                     if (
                         self.val_reward_fn is not None
@@ -820,6 +824,8 @@ class RayPPOTrainer:
                     if self.config.trainer.save_freq > 0 and self.global_step % self.config.trainer.save_freq == 0:
                         with _timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
+                            torch.cuda.empty_cache()
+                            gc.collect()
 
                 # collect metrics
                 n_gpus = self.resource_pool_manager.get_n_gpus()
@@ -828,6 +834,9 @@ class RayPPOTrainer:
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
 
                 self.logger.log(data=metrics, step=self.global_step)
+                del batch, gen_batch, gen_batch_output
+                torch.cuda.empty_cache()
+                gc.collect()
 
         # perform validation after training
         if self.val_reward_fn is not None:
@@ -839,7 +848,11 @@ class RayPPOTrainer:
                 val_metrics = self._validate()
                 self.logger.log(data=val_metrics, step=self.global_step)
 
+                torch.cuda.empty_cache()
+                gc.collect()
             print(f"Final validation metrics: {convert_dict_to_str(val_metrics)}")
 
         if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()
+            torch.cuda.empty_cache()
+            gc.collect()

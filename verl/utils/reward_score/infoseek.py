@@ -19,7 +19,8 @@ from mathruler.grader import grade_answer
 
 
 def infoseek_format_reward(predict_str: str) -> float:
-    pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
+    # pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
+    pattern = re.compile(r"<think>.*?</think>.*?<answer>.*?</answer>", re.DOTALL)
     format_match = re.fullmatch(pattern, predict_str)
     return 1.0 if format_match else 0.0
 

@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, Tuple, TypedDict
 
 import torch
 from transformers import PreTrainedTokenizer
-
+import numpy as np
 from ...protocol import DataProto
 from ...utils.reward_score import math_compute_score, r1v_compute_score, infoseek_compute_score
 
@@ -44,7 +44,7 @@ class CustomRewardManager:
     def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, Any]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
-        # breakpoint()
+        
         for i in range(len(data)):
             data_item = data[i]  # DataProtoItem
             response_ids = data_item.batch["responses"]
@@ -63,5 +63,18 @@ class CustomRewardManager:
             reward_tensor[i, valid_response_length - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
+
+        # metrics for actions
+        if 'turns_stats' in data.meta_info:
+            reward_metrics['env/number_of_actions/mean'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).mean())
+            reward_metrics['env/number_of_actions/max'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).max())
+            reward_metrics['env/number_of_actions/min'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).min())
+        if 'active_mask' in data.meta_info:
+            reward_metrics['env/finish_ratio'] = 1 - float(np.array(data.meta_info['active_mask'], dtype=np.int16).mean())
+        if 'valid_action_stats' in data.meta_info:
+            reward_metrics['env/number_of_valid_action'] = float(np.array(data.meta_info['valid_action_stats'], dtype=np.int16).mean())
+            reward_metrics['env/ratio_of_valid_action'] = float((np.array(data.meta_info['valid_action_stats'], dtype=np.int16) / np.array(data.meta_info['turns_stats'], dtype=np.int16)).mean())
+        if 'valid_search_stats' in data.meta_info:
+            reward_metrics['env/number_of_valid_search'] = float(np.array(data.meta_info['valid_search_stats'], dtype=np.int16).mean())
 
         return reward_tensor, reward_metrics
