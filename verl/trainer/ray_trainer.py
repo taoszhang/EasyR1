@@ -468,7 +468,7 @@ class RayPPOTrainer:
                 test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
                 
                 with _timer('step', timing_raw):
-                    first_input_ids = test_gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone()
+                    first_input_ids = test_gen_batch.batch['input_ids'][:, -gen_config.max_prompt_length:].clone()
                     with _timer('gen', timing_raw):
                         generation_manager.timing_raw = timing_raw
                         final_gen_batch_output = generation_manager.run_llm_loop(
@@ -556,7 +556,6 @@ class RayPPOTrainer:
             self.critic_wg = all_wg["critic"]
             self.critic_wg.init_model()
         if self.use_reference_policy:
-            # 加载一次模型
             self.ref_policy_wg = all_wg["ref"]
             self.ref_policy_wg.init_model()
 
@@ -565,8 +564,6 @@ class RayPPOTrainer:
             self.rm_wg.init_model()
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
-        # 加载两次模型
-        # breakpoint()
         self.actor_rollout_wg = all_wg["actor_rollout"]
         self.actor_rollout_wg.init_model()
 
@@ -719,7 +716,7 @@ class RayPPOTrainer:
                                 del gen_baseline_batch, gen_baseline_output
                     
                     else:
-                        first_input_ids = gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone().long()
+                        first_input_ids = gen_batch.batch['input_ids'][:, -gen_config.max_prompt_length:].clone()
                         with _timer('gen', timing_raw):
                             generation_manager.timing_raw = timing_raw
                             gen_batch_output = generation_manager.run_llm_loop(
@@ -730,8 +727,9 @@ class RayPPOTrainer:
                         for key in gen_batch_output.batch.keys():
                             gen_batch_output.batch[key] = gen_batch_output.batch[key].long()
 
-                    batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
-                                                            dtype=object)      
+                    batch.non_tensor_batch["uid"] = np.array(
+                        [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
+                    )
                     # repeat to align with repeated responses in rollout
                     batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
@@ -740,6 +738,7 @@ class RayPPOTrainer:
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:
                             raise NotImplementedError("Reward model is not supported yet.")
+                        
                         # we combine with rule-based rm
                         reward_tensor, reward_metrics = self.reward_fn(batch)
                         batch.batch["token_level_scores"] = reward_tensor

@@ -275,7 +275,7 @@ class LLMGenerationManager:
             for k, v in rollings.non_tensor_batch.items():
                 rollings_active[k] = v[active_mask]
             rollings_active = DataProto.from_single_dict(rollings_active, meta_info=rollings.meta_info)
-            # breakpoint()
+
             # gen_output = self._generate_with_gpu_padding(rollings_active)
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
             gen_batch.meta_info.update({'no_sleep': True})
@@ -287,7 +287,7 @@ class LLMGenerationManager:
             if step == 0 and not self.is_validation:
                 # 在第一次采样之后，对activate_mask同样进行拓展
                 active_mask = active_mask.repeat_interleave(repeats=self.config.rollout_n, dim=0)
-            # 这里会解决rollings_active和rollings对齐的问题
+            # 这里会将rollings和rollings_active对齐
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)
 
             # Execute in environment and process observations 这里分为三种类型，search, answer, invalid，如果是invalid，则接上一段prompt然后再次执行生成，只有answer对应的内容，修改为done
