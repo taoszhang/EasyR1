@@ -65,16 +65,16 @@ class CustomRewardManager:
                 reward_metrics[key].append(value)
 
         # metrics for actions
-        if 'turns_stats' in data.meta_info:
-            reward_metrics['env/number_of_actions/mean'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).mean())
-            reward_metrics['env/number_of_actions/max'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).max())
-            reward_metrics['env/number_of_actions/min'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).min())
-        if 'active_mask' in data.meta_info:
-            reward_metrics['env/finish_ratio'] = 1 - float(np.array(data.meta_info['active_mask'], dtype=np.int16).mean())
-        if 'valid_action_stats' in data.meta_info:
-            reward_metrics['env/number_of_valid_action'] = float(np.array(data.meta_info['valid_action_stats'], dtype=np.int16).mean())
-            reward_metrics['env/ratio_of_valid_action'] = float((np.array(data.meta_info['valid_action_stats'], dtype=np.int16) / np.array(data.meta_info['turns_stats'], dtype=np.int16)).mean())
-        if 'valid_search_stats' in data.meta_info:
-            reward_metrics['env/number_of_valid_search'] = float(np.array(data.meta_info['valid_search_stats'], dtype=np.int16).mean())
+        # if 'turns_stats' in data.meta_info:
+        #     reward_metrics['env/number_of_actions/mean'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).mean())
+        #     reward_metrics['env/number_of_actions/max'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).max())
+        #     reward_metrics['env/number_of_actions/min'] = float(np.array(data.meta_info['turns_stats'], dtype=np.int16).min())
+        # if 'active_mask' in data.meta_info:
+        #     reward_metrics['env/finish_ratio'] = 1 - float(np.array(data.meta_info['active_mask'], dtype=np.int16).mean())
+        # if 'valid_action_stats' in data.meta_info:
+        #     reward_metrics['env/number_of_valid_action'] = float(np.array(data.meta_info['valid_action_stats'], dtype=np.int16).mean())
+        #     reward_metrics['env/ratio_of_valid_action'] = float((np.array(data.meta_info['valid_action_stats'], dtype=np.int16) / np.array(data.meta_info['turns_stats'], dtype=np.int16)).mean())
+        # if 'valid_search_stats' in data.meta_info:
+        #     reward_metrics['env/number_of_valid_search'] = float(np.array(data.meta_info['valid_search_stats'], dtype=np.int16).mean())
 
         return reward_tensor, reward_metrics

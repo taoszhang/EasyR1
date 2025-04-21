@@ -112,7 +112,9 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         if 'train' in data_path:
             data_split = "train"
-        else:
+        elif 'val' in data_path:
+            data_split = "validation"
+        elif 'test' in data_path:
             data_split = "test" 
 
         if os.path.isdir(data_path):

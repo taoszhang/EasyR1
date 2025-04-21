@@ -83,10 +83,14 @@ def process_item(i: int, item: dict):
 
         return {
             'id': int(str(i).zfill(5)),
-            'images': np.array([{'bytes': image_bytes, 'path': image_path}], dtype=object),
-            'problem': make_prefix(question),
+            # 'images': {'bytes': image_bytes, 'path': image_path},
+            'image_path': [image_path],
+            'question': item['two_hop_question'],
+            'entity': item['entity_text'],
+            'entity_bridge': item['bridge_entity_text'],
             'answer': answer,
-            'ground_truth': np.array(ground_truth, dtype=object),
+            'answer_eval': item['answer_eval_2'],
+            'ground_truth': ground_truth,
             'problem_type': item['question_type']
         }
     except Exception as e:
@@ -100,10 +104,9 @@ def is_valid_sample(result):
         return False
 
     # Check if all necessary fields are present and not empty or invalid
-    required_fields = ['images', 'problem', 'answer', 'ground_truth', 'problem_type']
+    required_fields = ['images', 'answer', 'ground_truth']
     
     for field in required_fields:
-        
         if field == 'images':
             if not isinstance(result[field], np.ndarray) or len(result[field]) == 0:
                 print(f"Skipping sample due to invalid 'images' field.")
@@ -113,30 +116,19 @@ def is_valid_sample(result):
                     print(f"Skipping sample due to invalid image format.")
                     return False
                 
-        if field == 'ground_truth':
-            if not isinstance(result[field], np.ndarray) or len(result[field]) == 0:
-                print(f"Skipping sample due to invalid 'ground_truth' field.")
-                return False
-            for gt in result[field]:
-                if not isinstance(gt, str):
-                    print(f"Skipping sample due to invalid ground truth format.")
-                    return False
-                
-        if field == 'problem_type':
-            if not isinstance(result[field], str) or not result[field]:
-                print(f"Skipping sample due to invalid 'problem_type' field.")
-                return False
-            
+        # if field == 'ground_truth':
+        #     if not isinstance(result[field], np.ndarray) or len(result[field]) == 0:
+        #         print(f"Skipping sample due to invalid 'ground_truth' field.") 
+        #         return False
+        #     for gt in result[field]:
+        #         if not isinstance(gt, str):
+        #             print(f"Skipping sample due to invalid ground truth format.")
+        #             return False
+                    
         if field == 'answer':
             if not isinstance(result[field], str) or not result[field]:
                 print(f"Skipping sample due to invalid 'answer' field.")
                 return False
-        
-        if field == 'problem':
-            if not isinstance(result[field], str) or not result[field]:
-                print(f"Skipping sample due to invalid 'problem' field.")
-                return False
-
     return True
 
 if __name__ == "__main__":
@@ -155,23 +147,22 @@ if __name__ == "__main__":
             if result is not None:
                 processed_data.append(result)
 
-    processed_data = [result for result in processed_data if is_valid_sample(result)]
+    # processed_data = [result for result in processed_data if is_valid_sample(result)]
     # 切片十份保存
     for i in range(10):
         start = i * len(processed_data) // 10
         end = (i + 1) * len(processed_data) // 10
-        df = pd.DataFrame(processed_data[start:end])
+        # df = pd.DataFrame(processed_data[start:end])
         output_dir = '/data/tzhang/dataset/infoseek_bridge'
         os.makedirs(output_dir, exist_ok=True)
         if i < 7:
-            save_path = os.path.join(output_dir, f'infoseek_bridge_train', f'train-{i:05d}-of-00010.parquet')
+            continue
         elif i == 7:
-            save_path = os.path.join(output_dir, f'infoseek_bridge_validation', f'validation-{i:05d}-of-00010.parquet')
+            save_path = os.path.join(output_dir, f'infoseek_bridge_validation', f'validation-{i:05d}-of-00010.jsonl')
         else:
-            save_path = os.path.join(output_dir, f'infoseek_bridge_test', f'test-{i:05d}-of-00010.parquet')
+            save_path = os.path.join(output_dir, f'infoseek_bridge_test', f'test-{i:05d}-of-00010.jsonl')
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        df.to_parquet(save_path, index=True)
-        print(f"Saved part {i} to {save_path}")
-
+        save_jsonl(processed_data[start:end], save_path)
+        print(f"Saved {len(processed_data[start:end])} samples to {save_path}")
 
 

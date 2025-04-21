@@ -130,8 +130,8 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
     token_level_scores = data.batch["token_level_scores"]
     batch_size = data.batch.batch_size[0]
     # breakpoint()
-    # response_mask = data.batch["response_mask"]
-    response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
+    response_mask = data.batch["response_mask"]
+    # response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
 
     # compute kl between ref_policy and current policy
     if "ref_log_probs" in data.batch.keys():
@@ -159,8 +159,8 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 
 def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
     token_level_rewards = data.batch["token_level_rewards"]
-    # response_mask = data.batch["response_mask"]
-    response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
+    response_mask = data.batch["response_mask"]
+    # response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
     index = data.non_tensor_batch["uid"]
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch["values"]

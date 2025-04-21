@@ -24,6 +24,20 @@ def infoseek_format_reward(predict_str: str) -> float:
     format_match = re.fullmatch(pattern, predict_str)
     return 1.0 if format_match else 0.0
 
+def infoseek_search_reward(predict_str: str) -> float:
+    # 统计 <search>.*?</search> 出现的次数
+    pattern = re.compile(r"<search>.*?</search>", re.DOTALL)
+    search_matches = re.findall(pattern, predict_str)
+    if int(len(search_matches)) == 0:
+        return 0.0
+    if int(len(search_matches)) == 1:
+        return 0.25
+    if int(len(search_matches)) == 2:
+        return 0.5
+    if int(len(search_matches)) == 3:
+        return 0.25
+
+    # return float(len(search_matches)) / 2  # 返回 <think> 标签出现的次数
 
 def infoseek_string_accuracy_reward(predict_str: str, ground_truth: list) -> float:
     try:
@@ -61,6 +75,7 @@ def infoseek_numerical_accuracy_reward(predict_str: str, ground_truth: list) -> 
 
 def infoseek_compute_score(predict_str: str, ground_truth: list, problem_type: str) -> Dict[str, float]:
     format = infoseek_format_reward(predict_str)
+    search_time = infoseek_search_reward(predict_str)
     if problem_type == "String" or problem_type == "Time":
         accuracy = infoseek_string_accuracy_reward(predict_str, ground_truth)
     elif problem_type == "Numerical":
@@ -68,8 +83,8 @@ def infoseek_compute_score(predict_str: str, ground_truth: list, problem_type: s
     else:
         raise NotImplementedError(f"Problem type {problem_type} is not supported.")
     return {
-        # "overall": 0.5 * accuracy + 0.5 * format,
-        "overall": accuracy,
+        "overall": search_time + 0.5 * accuracy,
+        "search_times": search_time,
         "format": format,
         "accuracy": accuracy,
     }

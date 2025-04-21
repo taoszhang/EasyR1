@@ -260,12 +260,12 @@ class LLMGenerationManager:
             original_right_side['responses_with_info_mask'] = original_right_side['responses_with_info_mask'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
 
         active_mask = torch.ones(gen_batch.batch['input_ids'].shape[0], dtype=torch.bool)
-        turns_stats = torch.ones(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
-        valid_action_stats = torch.zeros(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
-        valid_search_stats = torch.zeros(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
+        # turns_stats = torch.ones(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
+        # valid_action_stats = torch.zeros(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
+        # valid_search_stats = torch.zeros(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
         active_num_list = [active_mask.sum().item() * self.config.rollout_n]
         rollings = gen_batch
-
+        # breakpoint()
         # Main generation loop
         for step in range(self.config.max_turns):
             if not active_mask.sum():
@@ -282,7 +282,7 @@ class LLMGenerationManager:
             gen_batch.meta_info.update({'no_sleep': True})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
-            
+            breakpoint()
             meta_info = gen_output.meta_info            
             responses_ids, responses_str = self._postprocess_responses(gen_output.batch['responses'])  # 取response</search>或</answer>前的内容，相当于截断，截断</search>优先
 
@@ -303,9 +303,9 @@ class LLMGenerationManager:
             curr_active_mask = torch.tensor([not done for done in dones], dtype=torch.bool)
             active_mask = active_mask * curr_active_mask
             active_num_list.append(active_mask.sum().item())
-            turns_stats[curr_active_mask] += 1
-            valid_action_stats += torch.tensor(valid_action, dtype=torch.int)
-            valid_search_stats += torch.tensor(is_search, dtype=torch.int)
+            # turns_stats[curr_active_mask] += 1
+            # valid_action_stats += torch.tensor(valid_action, dtype=torch.int)
+            # valid_search_stats += torch.tensor(is_search, dtype=torch.int)
 
             next_obs_ids = self._process_next_obs(next_obs)
             
@@ -334,7 +334,7 @@ class LLMGenerationManager:
             gen_batch.meta_info.update({'no_sleep': False})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
-
+            breakpoint()
             meta_info = gen_output.meta_info            
             responses_ids, responses_str = self._postprocess_responses(gen_output.batch['responses'])
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)
@@ -347,8 +347,8 @@ class LLMGenerationManager:
             curr_active_mask = torch.tensor([not done for done in dones], dtype=torch.bool)
             active_mask = active_mask * curr_active_mask
             active_num_list.append(active_mask.sum().item())
-            valid_action_stats += torch.tensor(valid_action, dtype=torch.int)
-            valid_search_stats += torch.tensor(is_search, dtype=torch.int)
+            # valid_action_stats += torch.tensor(valid_action, dtype=torch.int)
+            # valid_search_stats += torch.tensor(is_search, dtype=torch.int)
 
             original_right_side = self._update_right_side(
                 original_right_side,
@@ -356,10 +356,10 @@ class LLMGenerationManager:
             )
 
         # original_left side就是最开始的输出，original_right_side是在每次只取search或者是answer之前的内容，拼接得到的输出
-        meta_info['turns_stats'] = turns_stats.tolist()
-        meta_info['active_mask'] = active_mask.tolist()
-        meta_info['valid_action_stats'] = valid_action_stats.tolist()
-        meta_info['valid_search_stats'] = valid_search_stats.tolist()
+        # meta_info['turns_stats'] = turns_stats.tolist()
+        # meta_info['active_mask'] = active_mask.tolist()
+        # meta_info['valid_action_stats'] = valid_action_stats.tolist()
+        # meta_info['valid_search_stats'] = valid_search_stats.tolist()
         
         print("ACTIVE_TRAJ_NUM:", active_num_list)
         return self._compose_final_output(original_left_side, original_right_side, meta_info)
@@ -404,23 +404,21 @@ class LLMGenerationManager:
             self.tensor_fn.create_attention_mask(left_side['input_ids']),
             self.tensor_fn.create_attention_mask(final_output['responses'])
         ], dim=1)
+        final_output['response_mask'] = self.tensor_fn.create_attention_mask(
+            final_output['responses']
+        )
+
         # responses_with_info_mask是对于ret info进行mask的responses
-        # NOTE: 目前这个mask仅作用于advantage计算，不直接作用于actor的更新
-        final_output['responses_mask_info'] = self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
-        # final_output['info_mask'] = torch.cat([
+        # final_output['attention_mask'] = torch.cat([
         #     self.tensor_fn.create_attention_mask(left_side['input_ids']),
         #     self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
         # ], dim=1)
+        # final_output['response_mask'] = self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
 
         final_output['position_ids'] = self.tensor_fn.create_position_ids(
             final_output['attention_mask']
         )
         
-        final_output['response_mask'] = self.tensor_fn.create_attention_mask(
-            final_output['responses']
-        )
-        # final_output = DataProto.from_dict(final_output)
-        # final_output.meta_info.update(meta_info)
         final_output = DataProto.from_single_dict(final_output, meta_info=meta_info)
         return final_output
 
