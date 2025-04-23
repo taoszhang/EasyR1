@@ -20,7 +20,7 @@ When working with FSDP:
 
 import os
 from contextlib import contextmanager
-from typing import Any, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -31,6 +31,7 @@ from vllm import LLM, RequestOutput, SamplingParams
 
 from ....protocol import DataProto
 from ....utils import torch_functional as VF
+from ....utils.tokenizer import get_processor
 from ....utils.torch_dtypes import PrecisionType
 from ..base import BaseRollout
 from ..config import RolloutConfig
@@ -42,6 +43,13 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
     else:
         return np.repeat(value, repeats, axis=0)
 
+def _get_logit_bias(model_path: str, trust_remote_code: bool) -> Optional[Dict[int, float]]:
+    processor = get_processor(model_path, trust_remote_code=trust_remote_code)
+    if processor is not None and hasattr(processor, "image_token"):
+        image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
+        return {image_token_id: -100}
+    else:
+        return None
 
 class vLLMRollout(BaseRollout):
     def __init__(self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer):
@@ -65,15 +73,14 @@ class vLLMRollout(BaseRollout):
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
 
-        vllm_init_kwargs = {}
-        if config.limit_images > 0:
-            vllm_init_kwargs = {"limit_mm_per_prompt": {"image": config.limit_images}}
-
         self.inference_engine = LLM(
             model=model_path,
             skip_tokenizer_init=False,
+            trust_remote_code=config.trust_remote_code,
+            load_format="dummy",
             tensor_parallel_size=config.tensor_parallel_size,
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
+            seed=config.seed,
             gpu_memory_utilization=config.gpu_memory_utilization,
             enforce_eager=config.enforce_eager,
             max_model_len=config.prompt_length + config.response_length,
@@ -84,13 +91,17 @@ class vLLMRollout(BaseRollout):
             disable_mm_preprocessor_cache=True,
             disable_log_stats=config.disable_log_stats,
             enable_chunked_prefill=config.enable_chunked_prefill,
-            **vllm_init_kwargs,
+            limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
         )
 
         # Offload vllm model to reduce peak memory usage
         self.inference_engine.sleep(level=1)
 
-        sampling_kwargs = {"max_tokens": config.response_length, "detokenize": False}
+        sampling_kwargs = {
+            "max_tokens": config.response_length,
+            "detokenize": False,
+            "logit_bias": _get_logit_bias(model_path, trust_remote_code=config.trust_remote_code),
+        }
         default_sampling_params = SamplingParams()
         for key in config.to_dict().keys():
             if hasattr(default_sampling_params, key):

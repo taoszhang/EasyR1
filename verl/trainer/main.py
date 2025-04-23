@@ -28,9 +28,9 @@ from .config import PPOConfig
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 # Add RAY_DEBUG environment variable to enable Ray Debugger
-ray.init(runtime_env={
-    "env_vars": {"RAY_DEBUG": "1"}, 
-})
+# ray.init(runtime_env={
+#     "env_vars": {"RAY_DEBUG": "1"}, 
+# })
 
 # please make sure main_task is not scheduled on head
 @ray.remote(num_cpus=1)
@@ -92,6 +92,7 @@ class Runner:
 def main():
     cli_args = OmegaConf.from_cli()
     default_config = OmegaConf.structured(PPOConfig())
+
     if hasattr(cli_args, "config"):
         config_path = cli_args.pop("config", None)
         file_config = OmegaConf.load(config_path)
@@ -99,10 +100,22 @@ def main():
 
     ppo_config = OmegaConf.merge(default_config, cli_args)
     ppo_config = OmegaConf.to_object(ppo_config)
-    # import pdb; pdb.set_trace()
+
+    # if not ray.is_initialized():
+    #     # this is for local ray cluster
+    #     ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
     if not ray.is_initialized():
-        # this is for local ray cluster
-        ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
+        runtime_env = {
+            "env_vars": {
+                "TOKENIZERS_PARALLELISM": "true",
+                "NCCL_DEBUG": "WARN",
+                "VLLM_LOGGING_LEVEL": "INFO",
+                "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+                "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
+            }
+        }
+        ray.init(runtime_env=runtime_env)
+
     runner = Runner.remote()
     ray.get(runner.run.remote(ppo_config))
 

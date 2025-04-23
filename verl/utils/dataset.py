@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import torch
 from datasets import load_dataset
+from jinja2 import Template
 from PIL import Image
 from PIL.Image import Image as ImageObject
 from torch.utils.data import Dataset
@@ -28,7 +29,7 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
-import pandas as pd
+
 
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     tensors = defaultdict(list)
@@ -93,6 +94,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         system_prompt: str = None,
         max_pixels: int = None,
         min_pixels: int = None,
+        filter_overlong_prompts: bool = True,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -104,6 +106,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         self.system_prompt = system_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
+        self.filter_overlong_prompts = filter_overlong_prompts
 
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
@@ -124,7 +127,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         else:  # remote dataset
             self.dataset = load_dataset(data_path, split=data_split)
 
-
+    
     def __len__(self):
         return len(self.dataset)
 

@@ -20,22 +20,25 @@ from mathruler.grader import grade_answer
 
 def infoseek_format_reward(predict_str: str) -> float:
     # pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
-    pattern = re.compile(r"<think>.*?</think>.*?<answer>.*?</answer>", re.DOTALL)
-    format_match = re.fullmatch(pattern, predict_str)
-    return 1.0 if format_match else 0.0
+    pattern = re.compile(r"<think>.*?</think>\s*<search>.*?</search>\s*<information>.*?</information>", re.DOTALL)
+    # format_match = re.fullmatch(pattern, predict_str)
+    format_match = re.findall(pattern, predict_str)
+    return float(len(format_match))
+    # return 1.0 if format_match else 0.0
 
 def infoseek_search_reward(predict_str: str) -> float:
     # 统计 <search>.*?</search> 出现的次数
     pattern = re.compile(r"<search>.*?</search>", re.DOTALL)
     search_matches = re.findall(pattern, predict_str)
-    if int(len(search_matches)) == 0:
-        return 0.0
-    if int(len(search_matches)) == 1:
-        return 0.25
-    if int(len(search_matches)) == 2:
-        return 0.5
-    if int(len(search_matches)) == 3:
-        return 0.25
+    return float(len(search_matches))  # 返回 <search> 标签出现的次数
+    # if int(len(search_matches)) == 0:
+    #     return 0.0
+    # if int(len(search_matches)) == 1:
+    #     return 0.25
+    # if int(len(search_matches)) == 2:
+    #     return 0.5
+    # if int(len(search_matches)) == 3:
+    #     return 0.25
 
     # return float(len(search_matches)) / 2  # 返回 <think> 标签出现的次数
 
@@ -83,7 +86,7 @@ def infoseek_compute_score(predict_str: str, ground_truth: list, problem_type: s
     else:
         raise NotImplementedError(f"Problem type {problem_type} is not supported.")
     return {
-        "overall": search_time + 0.5 * accuracy,
+        "overall": accuracy,
         "search_times": search_time,
         "format": format,
         "accuracy": accuracy,

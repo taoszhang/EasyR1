@@ -279,10 +279,10 @@ class LLMGenerationManager:
 
             # gen_output = self._generate_with_gpu_padding(rollings_active)
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
-            gen_batch.meta_info.update({'no_sleep': True})
+            gen_batch.meta_info.update({'no_sleep': False})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
-            breakpoint()
+            # breakpoint()
             meta_info = gen_output.meta_info            
             responses_ids, responses_str = self._postprocess_responses(gen_output.batch['responses'])  # 取response</search>或</answer>前的内容，相当于截断，截断</search>优先
 
@@ -334,7 +334,7 @@ class LLMGenerationManager:
             gen_batch.meta_info.update({'no_sleep': False})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
-            breakpoint()
+            # breakpoint()
             meta_info = gen_output.meta_info            
             responses_ids, responses_str = self._postprocess_responses(gen_output.batch['responses'])
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)

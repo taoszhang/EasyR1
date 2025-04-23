@@ -110,21 +110,26 @@ class ResourcePoolManager:
         """Get the number of gpus in this cluster."""
         return sum([n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes])
 
+    # def _check_resource_available(self):
+    #     """Check if the resource pool can be satisfied in this ray cluster."""
+    #     node_available_resources = ray.state.available_resources_per_node()
+    #     node_available_gpus = {node: node_info.get("GPU", 0) for node, node_info in node_available_resources.items()}
+
+    #     # check total required gpus can be satisfied
+    #     total_available_gpus = sum(node_available_gpus.values())
+    #     total_required_gpus = sum(
+    #         [n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes]
+    #     )
+    #     if total_available_gpus < total_required_gpus:
+    #         raise ValueError(
+    #             f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}."
+    #         )
     def _check_resource_available(self):
         """Check if the resource pool can be satisfied in this ray cluster."""
-        node_available_resources = ray.state.available_resources_per_node()
-        node_available_gpus = {node: node_info.get("GPU", 0) for node, node_info in node_available_resources.items()}
-
-        # check total required gpus can be satisfied
-        total_available_gpus = sum(node_available_gpus.values())
-        total_required_gpus = sum(
-            [n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes]
-        )
-        if total_available_gpus < total_required_gpus:
-            raise ValueError(
-                f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}."
-            )
-
+        gpus_available = ray.available_resources().get("GPU", 0)
+        gpus_required = self.get_n_gpus()
+        if gpus_available < gpus_required:
+            raise ValueError(f"Total available GPUs {gpus_available} is less than total desired GPUs {gpus_required}.")
 
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penalty="kl"):
     token_level_scores = data.batch["token_level_scores"]
@@ -294,6 +299,7 @@ class RayPPOTrainer:
             system_prompt=self.config.data.system_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
+            filter_overlong_prompts=self.config.data.filter_overlong_prompts,
         )
         # use sampler for better ckpt resume
         if self.config.data.shuffle:
@@ -325,6 +331,7 @@ class RayPPOTrainer:
             system_prompt=self.config.data.system_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
+            filter_overlong_prompts=self.config.data.filter_overlong_prompts,
         )
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
@@ -369,7 +376,6 @@ class RayPPOTrainer:
         samples = samples[: self.config.trainer.val_generations_to_log]
         self.logger.log_generation(samples, self.global_step)
 
-    # TODO 需要修改validate，同样用于适配search r1，可以先改这里
     def _validate(self) -> Dict[str, Any]:
         reward_tensor_lst = []
         data_source_lst = []
@@ -506,6 +512,7 @@ class RayPPOTrainer:
         """Init resource pool and worker group"""
         self.resource_pool_manager.create_resource_pool()
         self.resource_pool_to_cls = {pool: {} for pool in self.resource_pool_manager.resource_pool_dict.values()}
+
         # create actor and rollout
         if self.hybrid_engine:
             resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
@@ -558,6 +565,7 @@ class RayPPOTrainer:
         if self.use_critic:
             self.critic_wg = all_wg["critic"]
             self.critic_wg.init_model()
+
         if self.use_reference_policy:
             self.ref_policy_wg = all_wg["ref"]
             self.ref_policy_wg.init_model()

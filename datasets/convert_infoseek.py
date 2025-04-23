@@ -84,8 +84,9 @@ def process_item(i: int, item: dict):
         return {
             'id': int(str(i).zfill(5)),
             'images': np.array([{'bytes': image_bytes, 'path': image_path}], dtype=object),
-            'problem': make_prefix(question),
+            'problem': question,
             'answer': answer,
+            'bridge_entity': item['bridge_entity_text'],
             'ground_truth': np.array(ground_truth, dtype=object),
             'problem_type': item['question_type']
         }
@@ -161,7 +162,7 @@ if __name__ == "__main__":
         start = i * len(processed_data) // 10
         end = (i + 1) * len(processed_data) // 10
         df = pd.DataFrame(processed_data[start:end])
-        output_dir = '/data/tzhang/dataset/infoseek_bridge'
+        output_dir = '/data/tzhang/dataset/infoseek_bridge_with_entity'
         os.makedirs(output_dir, exist_ok=True)
         if i < 7:
             save_path = os.path.join(output_dir, f'infoseek_bridge_train', f'train-{i:05d}-of-00010.parquet')

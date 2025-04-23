@@ -50,6 +50,7 @@ class DataConfig:
     seed: int = 1
     max_pixels: int = 4194304
     min_pixels: int = 262144
+    filter_overlong_prompts: bool = True
 
 
 @dataclass
@@ -99,6 +100,10 @@ class TrainerConfig:
         if self.save_checkpoint_path is None:
             self.save_checkpoint_path = os.path.join("checkpoints", self.project_name, self.experiment_name)
 
+        self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)  # ray job uses absolute path
+        if self.load_checkpoint_path is not None:
+            self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
+
 
 @dataclass
 class PPOConfig:
@@ -111,6 +116,7 @@ class PPOConfig:
     def post_init(self):
         self.worker.rollout.prompt_length = self.data.max_prompt_length
         self.worker.rollout.response_length = self.data.max_response_length
+        self.worker.rollout.trust_remote_code = self.worker.actor.model.trust_remote_code
         self.worker.actor.disable_kl = self.algorithm.disable_kl
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty

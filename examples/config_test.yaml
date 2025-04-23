@@ -4,7 +4,7 @@ data:
   prompt_key: problem
   answer_key: ground_truth
   image_key: images
-  max_prompt_length: 2048
+  max_prompt_length: 4096
   max_response_length: 512
   max_start_length: 2048
   max_obs_length: 512
@@ -13,9 +13,10 @@ data:
   val_batch_size: 512
   shuffle: true
   seed: 1
-  max_pixels: 802816
-  min_pixels: 262144
-
+  max_pixels: 401408
+  min_pixels: 100352
+  filter_overlong_prompts: true
+  
 algorithm:
   adv_estimator: grpo
   disable_kl: false
@@ -47,7 +48,7 @@ worker:
       enable_rank0_init: true
     offload:
       offload_params: false  # true: more CPU memory; false: more GPU memory
-      offload_optimizer: true  # true: more CPU memory; false: more GPU memory
+      offload_optimizer: false  # true: more CPU memory; false: more GPU memory
 
   rollout:
     temperature: 1.0
@@ -55,7 +56,7 @@ worker:
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 4
+    tensor_parallel_size: 1
     limit_images: 0
     val_override_config:
       temperature: 0.5
@@ -86,7 +87,7 @@ trainer:
   val_generations_to_log: 1
   save_freq: 40  # -1 to disable
   save_limit: 15  # -1 to disable
-  save_checkpoint_path: /data/tzhang/outputs/EasyR1/checkpoints/infoseek_bridge_search_reward
+  save_checkpoint_path: /data/tzhang/outputs/EasyR1/checkpoints/infoseek_bridge
   load_checkpoint_path: null
   
 retriever:
