@@ -212,6 +212,7 @@ class DataParallelPPOActor(BasePPOActor):
     def update_policy(self, data: DataProto) -> Dict[str, Any]:
         self.actor_module.train()
         # 就算是在算advantage的时候去掉info部分也不行，必须在更新的时候mask掉这部分内容。
+        # breakpoint()
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
         if self.config.use_kl_loss and not self.config.disable_kl:

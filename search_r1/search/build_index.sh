@@ -1,6 +1,6 @@
 
-corpus_file=/your/corpus/jsonl/file # jsonl
-save_dir=/the/path/to/save/index
+corpus_file=/data/tzhang/project/Infoseek_multi_hop/search_engine/raw_data/infoseek_bridge_wiki.jsonl # jsonl
+save_dir=/data/tzhang/project/Infoseek_multi_hop/search_engine/raw_data
 retriever_name=e5 # this is for indexing naming
 retriever_model=intfloat/e5-base-v2
 

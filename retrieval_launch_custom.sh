@@ -1,6 +1,6 @@
-file_path=/data/tzhang/dataset/search-r1/wikipedia
+file_path=/data/tzhang/project/Infoseek_multi_hop/search_engine/raw_data
 index_file=$file_path/e5_Flat.index
-corpus_file=$file_path/wiki-18.jsonl
+corpus_file=$file_path/infoseek_bridge_wiki_contents.jsonl
 retriever_name=e5
 retriever_path=intfloat/e5-base-v2
 

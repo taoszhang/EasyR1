@@ -28,19 +28,11 @@ def infoseek_format_reward(predict_str: str) -> float:
 
 def infoseek_search_reward(predict_str: str) -> float:
     # 统计 <search>.*?</search> 出现的次数
+    # breakpoint()
+    predict_str_clean = predict_str.replace("<search> and </search>", "") # 去掉invid部分的prompt
     pattern = re.compile(r"<search>.*?</search>", re.DOTALL)
-    search_matches = re.findall(pattern, predict_str)
+    search_matches = re.findall(pattern, predict_str_clean)
     return float(len(search_matches))  # 返回 <search> 标签出现的次数
-    # if int(len(search_matches)) == 0:
-    #     return 0.0
-    # if int(len(search_matches)) == 1:
-    #     return 0.25
-    # if int(len(search_matches)) == 2:
-    #     return 0.5
-    # if int(len(search_matches)) == 3:
-    #     return 0.25
-
-    # return float(len(search_matches)) / 2  # 返回 <think> 标签出现的次数
 
 def infoseek_string_accuracy_reward(predict_str: str, ground_truth: list) -> float:
     try:
@@ -86,7 +78,7 @@ def infoseek_compute_score(predict_str: str, ground_truth: list, problem_type: s
     else:
         raise NotImplementedError(f"Problem type {problem_type} is not supported.")
     return {
-        "overall": accuracy,
+        "overall": accuracy*search_time,
         "search_times": search_time,
         "format": format,
         "accuracy": accuracy,

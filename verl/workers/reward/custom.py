@@ -49,7 +49,17 @@ class CustomRewardManager:
             data_item = data[i]  # DataProtoItem
             response_ids = data_item.batch["responses"]
             response_mask = data_item.batch["response_mask"]
-            valid_response_length = response_mask.sum()
+            # valid_response_length = response_mask.sum()
+            
+            # 为了适应responses info mask 而做出的更改。# 找出所有非零的位置
+            nonzero_indices = (response_mask != 0).nonzero(as_tuple=False)
+            if nonzero_indices.numel() == 0:
+                # 如果没有非零元素，valid_response_length是0（tensor类型）
+                valid_response_length = torch.tensor(0, device=response_mask.device, dtype=torch.long)
+            else:
+                # 否则取最后一个非零位置 + 1（保持是tensor）
+                valid_response_length = torch.tensor(nonzero_indices[-1].item() + 1, device=response_mask.device, dtype=torch.long)
+
             valid_response_ids = response_ids[:valid_response_length]
 
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)

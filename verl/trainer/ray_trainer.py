@@ -110,20 +110,6 @@ class ResourcePoolManager:
         """Get the number of gpus in this cluster."""
         return sum([n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes])
 
-    # def _check_resource_available(self):
-    #     """Check if the resource pool can be satisfied in this ray cluster."""
-    #     node_available_resources = ray.state.available_resources_per_node()
-    #     node_available_gpus = {node: node_info.get("GPU", 0) for node, node_info in node_available_resources.items()}
-
-    #     # check total required gpus can be satisfied
-    #     total_available_gpus = sum(node_available_gpus.values())
-    #     total_required_gpus = sum(
-    #         [n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes]
-    #     )
-    #     if total_available_gpus < total_required_gpus:
-    #         raise ValueError(
-    #             f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}."
-    #         )
     def _check_resource_available(self):
         """Check if the resource pool can be satisfied in this ray cluster."""
         gpus_available = ray.available_resources().get("GPU", 0)
@@ -360,13 +346,13 @@ class RayPPOTrainer:
         self.config.worker.critic.optim.training_steps = training_steps
         print(f"Total training steps: {self.training_steps}")
 
-    def _maybe_log_val_generations(self, inputs: List[str], outputs: List[str], scores: List[float]) -> None:
+    def _maybe_log_val_generations(self, inputs: List[str], outputs: List[str], scores: List[float], ground_truths, answers):
         """Log a table of validation samples"""
         if self.config.trainer.val_generations_to_log <= 0:
             return
-
+        # breakpoint()
         # Create tuples of (input, output, score) and sort by input text
-        samples = list(zip(inputs, outputs, scores))
+        samples = list(zip(inputs, outputs, scores, ground_truths, answers))
         samples.sort(key=lambda x: x[0])  # Sort by input text
 
         # Use fixed random seed for deterministic shuffling
@@ -380,7 +366,7 @@ class RayPPOTrainer:
         reward_tensor_lst = []
         data_source_lst = []
         # Lists to collect samples for the table
-        sample_inputs, sample_outputs, sample_scores = [], [], []
+        sample_inputs, sample_outputs, sample_scores, sample_ground_truths, sample_answers = [], [], [], [], []
         reward_metrics_lst = defaultdict(list)
 
         gen_config = GenerationConfig(
@@ -403,7 +389,7 @@ class RayPPOTrainer:
             config=gen_config,
             is_validation = True,
         )
-
+        val_time = 0
         if not self.config.retriever.do_search:
             for test_data in self.val_dataloader:
                 test_batch = DataProto.from_single_dict(test_data)
@@ -449,12 +435,17 @@ class RayPPOTrainer:
                     reward_metrics_lst[key].extend(value)
         else:
             for batch_dict in self.val_dataloader:
+                val_time += 1
+                if val_time > 1:
+                    break
                 timing_raw = {}
                 test_batch = DataProto.from_single_dict(batch_dict)
                 # Store original inputs
                 input_ids = test_batch.batch["input_ids"]
                 input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
                 sample_inputs.extend(input_texts)
+                sample_ground_truths.extend(test_batch.non_tensor_batch["ground_truth"])
+                sample_answers.extend(test_batch.non_tensor_batch["answer"])
 
                 if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
                     test_gen_batch = test_batch.pop(
@@ -467,13 +458,6 @@ class RayPPOTrainer:
                         non_tensor_batch_keys=["raw_prompt_ids"],
                     )
                 
-                # test_gen_batch.meta_info = {
-                #     'eos_token_id': self.tokenizer.eos_token_id,
-                #     'pad_token_id': self.tokenizer.pad_token_id,
-                #     'recompute_log_prob': False,
-                #     'do_sample': False,
-                #     'validate': True,
-                # }
                 test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
                 
                 with _timer('step', timing_raw):
@@ -503,7 +487,8 @@ class RayPPOTrainer:
                     for key, value in reward_metrics.items():
                         reward_metrics_lst[key].extend(value)             
 
-        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores, 
+                                        ground_truths=sample_ground_truths, answers=sample_answers)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         return {"val/reward_score": reward_score, **val_reward_metrics}
