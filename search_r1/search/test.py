@@ -1,3 +1,4 @@
+import re
 import requests
 from typing import List
 
@@ -28,8 +29,41 @@ def _passages2string(retrieval_result):
 
     return format_reference
 
+def postprocess_predictions(predictions):
+    """
+    Process (text-based) predictions from llm into actions and validity flags.
+    
+    Args:
+        predictions: List of raw predictions
+        
+    Returns:
+        Tuple of (actions list, validity flags list)
+    """
+    actions = []
+    contents = []
+            
+    for prediction in predictions:
+        if isinstance(prediction, str): # for llm output
+            pattern = r'<(search|answer)>(.*?)</\1>'
+            match = re.search(pattern, prediction, re.DOTALL)
+            if match:
+                content = match.group(2).strip()  # Return only the content inside the tags
+                action = match.group(1)
+            else:
+                content = ''
+                action = None
+        else:
+            raise ValueError(f"Invalid prediction type: {type(prediction)}")
+        
+        actions.append(action)
+        contents.append(content)
+        
+    return actions, contents
+
+
 if __name__ == "__main__":
 
-    query = "What is the location of Kungsholm Church?"
-    result = batch_search([query])
+    query = "<search query='Madhabkunda waterfall country'> </search>"
+    actions, contents = postprocess_predictions([query])
+    result = batch_search(contents)
     print(result)

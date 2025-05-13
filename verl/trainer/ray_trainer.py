@@ -120,9 +120,7 @@ class ResourcePoolManager:
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penalty="kl"):
     token_level_scores = data.batch["token_level_scores"]
     batch_size = data.batch.batch_size[0]
-    # breakpoint()
     response_mask = data.batch["response_mask"]
-    # response_mask = data.batch["responses_mask_info"] if "responses_mask_info" in data.batch else data.batch["response_mask"]
 
     # compute kl between ref_policy and current policy
     if "ref_log_probs" in data.batch.keys():
@@ -444,7 +442,8 @@ class RayPPOTrainer:
                 input_ids = test_batch.batch["input_ids"]
                 input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
                 sample_inputs.extend(input_texts)
-                sample_ground_truths.extend(test_batch.non_tensor_batch["ground_truth"])
+                # sample_ground_truths.extend(test_batch.non_tensor_batch["ground_truth"])
+                sample_ground_truths.extend([str(item) for item in test_batch.non_tensor_batch["ground_truth"]])
                 sample_answers.extend(test_batch.non_tensor_batch["answer"])
 
                 if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():

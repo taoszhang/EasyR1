@@ -162,7 +162,7 @@ if __name__ == "__main__":
         start = i * len(processed_data) // 10
         end = (i + 1) * len(processed_data) // 10
         df = pd.DataFrame(processed_data[start:end])
-        output_dir = '/data/tzhang/dataset/infoseek_bridge_with_entity'
+        output_dir = '/data/tzhang/dataset/infoseek_bridge_question_only'
         os.makedirs(output_dir, exist_ok=True)
         if i < 7:
             save_path = os.path.join(output_dir, f'infoseek_bridge_train', f'train-{i:05d}-of-00010.parquet')

@@ -1,8 +1,8 @@
 set -x
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
 MODEL_PATH=/data/tzhang/model/Qwen2.5-VL-7B-Instruct  # replace it with your local file path
-experiment_name=accuracy*format+accuracy*search_time
-save_path=/data/tzhang/outputs/EasyR1/checkpoints_format_num_redo/accuracy*format+accuracy*search_time
+experiment_name=acc_only_custom_ret_6_bs_192
+save_path=/data/tzhang/outputs/EasyR1/checkpoints/acc_only_custom_ret_6_bs_192
 load_checkpoint_path=
 mkdir -p ${save_path}
 
@@ -18,16 +18,16 @@ python3 -m verl.trainer.main \
     data.max_start_length=2048 \
     data.max_obs_length=512 \
     data.max_end_length=2048 \
-    data.rollout_batch_size=128 \
-    data.val_batch_size=256 \
-    worker.actor.global_batch_size=64 \
+    data.rollout_batch_size=192 \
+    data.val_batch_size=384 \
     worker.actor.model.model_path=${MODEL_PATH} \
+    worker.actor.global_batch_size=96 \
     worker.rollout.enable_chunked_prefill=false \
     worker.rollout.gpu_memory_utilization=0.7 \
     worker.rollout.tensor_parallel_size=2 \
     worker.rollout.n=8 \
     trainer.experiment_name=${experiment_name} \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=6 \
     trainer.save_checkpoint_path=${save_path} \
     trainer.load_checkpoint_path=${load_checkpoint_path} \
     trainer.val_freq=20 \

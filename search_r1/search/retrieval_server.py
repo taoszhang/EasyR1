@@ -170,7 +170,7 @@ class BM25Retriever(BaseRetriever):
             warnings.warn('Not enough documents retrieved!')
         else:
             hits = hits[:num]
-        import pdb; pdb.set_trace()
+
         if self.contain_doc:
             all_contents = [
                 json.loads(self.searcher.doc(hit.docid).raw())['contents'] 

@@ -144,6 +144,7 @@ def compute_grpo_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape: (bs, response_length)
     """
+    # breakpoint()
     response_length = token_level_rewards.shape[-1]
     scores = token_level_rewards.sum(dim=-1)
     id2score = defaultdict(list)
@@ -318,6 +319,7 @@ def compute_policy_loss(
         pg_clipfrac: (float)
             a float number indicating the fraction of policy gradient loss being clipped
     """
+    # breakpoint()
     negative_approx_kl = log_probs - old_log_probs
     # clamp the ratio before exp to avoid nan
     # see: https://github.com/pytorch/pytorch/issues/10729

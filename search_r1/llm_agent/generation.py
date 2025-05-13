@@ -282,10 +282,9 @@ class LLMGenerationManager:
             gen_batch.meta_info.update({'no_sleep': False})
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
-            # breakpoint()
             meta_info = gen_output.meta_info            
             responses_ids, responses_str = self._postprocess_responses(gen_output.batch['responses'])  # 取response</search>或</answer>前的内容，相当于截断，截断</search>优先
-
+            # breakpoint()
             if step == 0 and not self.is_validation:
                 rollings = rollings.repeat(repeat_times=self.config.rollout_n, interleave=True)
                 active_mask = active_mask.repeat_interleave(repeats=self.config.rollout_n, dim=0)
