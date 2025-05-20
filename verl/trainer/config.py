@@ -45,12 +45,20 @@ class DataConfig:
     max_end_length: int = 512
     rollout_batch_size: int = 512
     val_batch_size: int = -1
-    system_prompt: Optional[str] = None
+    format_prompt: Optional[str] = None
+    override_chat_template: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
     max_pixels: int = 4194304
     min_pixels: int = 262144
     filter_overlong_prompts: bool = True
+
+    def post_init(self):
+        if self.format_prompt is not None:
+            if os.path.exists(self.format_prompt):  # ray job uses absolute path
+                self.format_prompt = os.path.abspath(self.format_prompt)
+            else:
+                self.format_prompt = None
 
 
 @dataclass
@@ -79,7 +87,7 @@ class RetrieverConfig:
 
 @dataclass
 class TrainerConfig:
-    total_episodes: int = 10
+    total_epochs: int = 10
     max_steps: Optional[int] = None
     project_name: str = "easy_r1"
     experiment_name: str = "demo"
@@ -103,7 +111,6 @@ class TrainerConfig:
         self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)  # ray job uses absolute path
         if self.load_checkpoint_path is not None:
             self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
-
 
 @dataclass
 class PPOConfig:

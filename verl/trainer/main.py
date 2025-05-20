@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
-"""
 
 import json
 
@@ -23,8 +20,9 @@ from omegaconf import OmegaConf
 from ..single_controller.ray import RayWorkerGroup
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..workers.fsdp_workers import FSDPWorker
-from ..workers.reward import CustomRewardManager
+from ..workers.reward import BatchFunctionRewardManager, SequentialFunctionRewardManager
 from .config import PPOConfig
+from .data_loader import create_dataloader
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 # Add RAY_DEBUG environment variable to enable Ray Debugger
@@ -43,17 +41,18 @@ class Runner:
 
     def run(self, config: PPOConfig):
         # print config
-        config.deep_post_init()
         print(json.dumps(config.to_dict(), indent=2))
 
         # instantiate tokenizer
         tokenizer = get_tokenizer(
             config.worker.actor.model.model_path,
+            override_chat_template=config.data.override_chat_template,
             trust_remote_code=config.worker.actor.model.trust_remote_code,
             use_fast=True,
         )
         processor = get_processor(
             config.worker.actor.model.model_path,
+            override_chat_template=config.data.override_chat_template,
             trust_remote_code=config.worker.actor.model.trust_remote_code,
             use_fast=True,
         )
@@ -76,13 +75,25 @@ class Runner:
         }
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
-        reward_fn = CustomRewardManager(tokenizer=tokenizer, compute_score=config.worker.reward.compute_score)
-        val_reward_fn = CustomRewardManager(tokenizer=tokenizer, compute_score=config.worker.reward.compute_score)
+        if config.worker.reward.reward_type == "sequential":
+            RewardManager = SequentialFunctionRewardManager
+        elif config.worker.reward.reward_type == "batch":
+            RewardManager = BatchFunctionRewardManager
+        else:
+            raise NotImplementedError(f"Unknown reward type {config.worker.reward.reward_type}.")
+
+        RemoteRewardManager = ray.remote(RewardManager).options(num_cpus=config.worker.reward.num_cpus)
+        reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+        val_reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+
+        train_dataloader, val_dataloader = create_dataloader(config.data, tokenizer, processor)
 
         trainer = RayPPOTrainer(
             config=config,
             tokenizer=tokenizer,
             processor=processor,
+            train_dataloader=train_dataloader,
+            val_dataloader=val_dataloader,
             role_worker_mapping=role_worker_mapping,
             resource_pool_manager=resource_pool_manager,
             ray_worker_group_cls=ray_worker_group_cls,
@@ -103,7 +114,8 @@ def main():
         default_config = OmegaConf.merge(default_config, file_config)
 
     ppo_config = OmegaConf.merge(default_config, cli_args)
-    ppo_config = OmegaConf.to_object(ppo_config)
+    ppo_config: PPOConfig = OmegaConf.to_object(ppo_config)
+    ppo_config.deep_post_init()
 
     # if not ray.is_initialized():
     #     # this is for local ray cluster
@@ -113,9 +125,10 @@ def main():
             "env_vars": {
                 "TOKENIZERS_PARALLELISM": "true",
                 "NCCL_DEBUG": "WARN",
-                "VLLM_LOGGING_LEVEL": "INFO",
+                "VLLM_LOGGING_LEVEL": "WARN",
                 "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
                 "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
+                "PYTHONUNBUFFERED": "1",
             }
         }
         ray.init(runtime_env=runtime_env)

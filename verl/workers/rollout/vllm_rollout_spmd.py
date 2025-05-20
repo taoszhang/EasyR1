@@ -11,12 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-The vllm_rollout that can be applied in different backend
-When working with FSDP:
-- Use DTensor weight loader (recommended) or HF weight loader
-- Utilize state_dict from the FSDP to synchronize the weights among tp ranks in vLLM
-"""
 
 import os
 from contextlib import contextmanager
@@ -29,12 +23,21 @@ from tensordict import TensorDict
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
+<<<<<<< HEAD:verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
 from ....protocol import DataProto
 from ....utils import torch_functional as VF
 from ....utils.tokenizer import get_processor
 from ....utils.torch_dtypes import PrecisionType
 from ..base import BaseRollout
 from ..config import RolloutConfig
+=======
+from ...protocol import DataProto
+from ...utils import torch_functional as VF
+from ...utils.tokenizer import get_processor
+from ...utils.torch_dtypes import PrecisionType
+from .base import BaseRollout
+from .config import RolloutConfig
+>>>>>>> upstream/main:verl/workers/rollout/vllm_rollout_spmd.py
 
 
 def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
@@ -50,6 +53,15 @@ def _get_logit_bias(model_path: str, trust_remote_code: bool) -> Optional[Dict[i
         return {image_token_id: -100}
     else:
         return None
+
+def _get_logit_bias(model_path: str, trust_remote_code: bool) -> Optional[Dict[int, float]]:
+    processor = get_processor(model_path, trust_remote_code=trust_remote_code)
+    if processor is not None and hasattr(processor, "image_token"):
+        image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
+        return {image_token_id: -100}
+    else:
+        return None
+
 
 class vLLMRollout(BaseRollout):
     def __init__(self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer):
@@ -67,9 +79,6 @@ class vLLMRollout(BaseRollout):
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
 
-        if not config.enforce_eager and config.free_cache_engine:
-            raise ValueError("CUDA graph should be disabled when `free_cache_engine` is True.")
-
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
 
@@ -78,20 +87,30 @@ class vLLMRollout(BaseRollout):
             skip_tokenizer_init=False,
             trust_remote_code=config.trust_remote_code,
             load_format="dummy",
+<<<<<<< HEAD:verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
             tensor_parallel_size=config.tensor_parallel_size,
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             seed=config.seed,
-            gpu_memory_utilization=config.gpu_memory_utilization,
-            enforce_eager=config.enforce_eager,
-            max_model_len=config.prompt_length + config.response_length,
-            max_num_batched_tokens=config.max_num_batched_tokens,
-            enable_sleep_mode=True,
+=======
+            dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
+            seed=config.seed,
+            max_model_len=config.max_model_len or config.prompt_length + config.response_length,
             distributed_executor_backend="external_launcher",
-            disable_custom_all_reduce=True,
-            disable_mm_preprocessor_cache=True,
+            tensor_parallel_size=config.tensor_parallel_size,
+>>>>>>> upstream/main:verl/workers/rollout/vllm_rollout_spmd.py
+            gpu_memory_utilization=config.gpu_memory_utilization,
+            max_num_batched_tokens=config.max_num_batched_tokens,
             disable_log_stats=config.disable_log_stats,
-            enable_chunked_prefill=config.enable_chunked_prefill,
+            enforce_eager=config.enforce_eager,
+            disable_custom_all_reduce=True,
             limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
+            disable_mm_preprocessor_cache=True,
+            enable_chunked_prefill=config.enable_chunked_prefill,
+<<<<<<< HEAD:verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
+            limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
+=======
+            enable_sleep_mode=True,
+>>>>>>> upstream/main:verl/workers/rollout/vllm_rollout_spmd.py
         )
 
         # Offload vllm model to reduce peak memory usage
@@ -165,10 +184,6 @@ class vLLMRollout(BaseRollout):
                 input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
-                if "multi_modal_inputs" in non_tensor_batch.keys():
-                    non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
-                        non_tensor_batch["multi_modal_inputs"], self.sampling_params.n
-                    )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -182,7 +197,7 @@ class vLLMRollout(BaseRollout):
         # position_ids:   [0,0,0,0,0,1,2,3 | 4,5,6,7,8,9,10,11]
         response_position_ids = position_ids[..., -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
-        response_mask = VF.get_eos_mask(
+        response_mask = VF.get_response_mask(
             response_ids=response_ids, eos_token_id=eos_token_id, dtype=attention_mask.dtype
         )
         attention_mask = torch.cat((attention_mask, response_mask), dim=-1)

@@ -19,14 +19,16 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from torch.utils.tensorboard import SummaryWriter
-
 from ..py_functional import convert_dict_to_str, flatten_dict, is_package_available, unflatten_dict
 from .gen_logger import AggregateGenerationsLogger
 
 
 if is_package_available("mlflow"):
     import mlflow  # type: ignore
+
+
+if is_package_available("tensorboard"):
+    from torch.utils.tensorboard import SummaryWriter
 
 
 if is_package_available("wandb"):
@@ -65,13 +67,36 @@ class MlflowLogger(Logger):
         mlflow.log_metrics(metrics=data, step=step)
 
 
+class SwanlabLogger(Logger):
+    def __init__(self, config: Dict[str, Any]) -> None:
+        swanlab_key = os.getenv("SWANLAB_API_KEY")
+        swanlab_dir = os.getenv("SWANLAB_DIR", "swanlab_log")
+        swanlab_mode = os.getenv("SWANLAB_MODE", "cloud")
+        if swanlab_key:
+            swanlab.login(swanlab_key)
+
+        swanlab.init(
+            project=config["trainer"]["project_name"],
+            experiment_name=config["trainer"]["experiment_name"],
+            config={"UPPERFRAMEWORK": "EasyR1", "FRAMEWORK": "veRL", **config},
+            logdir=swanlab_dir,
+            mode=swanlab_mode,
+        )
+
+    def log(self, data: Dict[str, Any], step: int) -> None:
+        swanlab.log(data=data, step=step)
+
+    def finish(self) -> None:
+        swanlab.finish()
+
+
 class TensorBoardLogger(Logger):
     def __init__(self, config: Dict[str, Any]) -> None:
         tensorboard_dir = os.getenv("TENSORBOARD_DIR", "tensorboard_log")
         os.makedirs(tensorboard_dir, exist_ok=True)
         print(f"Saving tensorboard log to {tensorboard_dir}.")
         self.writer = SummaryWriter(tensorboard_dir)
-        self.writer.add_hparams(flatten_dict(config))
+        self.writer.add_hparams(hparam_dict=flatten_dict(config), metric_dict={"placeholder": 0})
 
     def log(self, data: Dict[str, Any], step: int) -> None:
         for key, value in data.items():
@@ -96,35 +121,12 @@ class WandbLogger(Logger):
         wandb.finish()
 
 
-class SwanlabLogger(Logger):
-    def __init__(self, config: Dict[str, Any]) -> None:
-        swanlab_key = os.getenv("SWANLAB_API_KEY")
-        swanlab_dir = os.getenv("SWANLAB_DIR", "swanlab_log")
-        swanlab_mode = os.getenv("SWANLAB_MODE", "cloud")
-        if swanlab_key:
-            swanlab.login(swanlab_key)
-
-        swanlab.init(
-            project=config["trainer"]["project_name"],
-            experiment_name=config["trainer"]["experiment_name"],
-            config={"UPPERFRAMEWORK": "EasyR1", "FRAMEWORK": "veRL", **config},
-            logdir=swanlab_dir,
-            mode=swanlab_mode,
-        )
-
-    def log(self, data: Dict[str, Any], step: int) -> None:
-        swanlab.log(data=data, step=step)
-
-    def finish(self) -> None:
-        swanlab.finish()
-
-
 LOGGERS = {
-    "wandb": WandbLogger,
-    "mlflow": MlflowLogger,
-    "tensorboard": TensorBoardLogger,
     "console": ConsoleLogger,
+    "mlflow": MlflowLogger,
     "swanlab": SwanlabLogger,
+    "tensorboard": TensorBoardLogger,
+    "wandb": WandbLogger,
 }
 
 
@@ -146,7 +148,7 @@ class Tracker:
         for logger in self.loggers:
             logger.log(data=data, step=step)
 
-    def log_generation(self, samples: List[Tuple[str, str, float]], step: int) -> None:
+    def log_generation(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
         self.gen_logger.log(samples, step)
 
     def __del__(self):
