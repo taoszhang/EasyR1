@@ -297,7 +297,7 @@ class RayPPOTrainer:
             dataset=self.train_dataset,
             batch_size=self.config.data.rollout_batch_size,
             sampler=sampler,
-            num_workers=8,
+            num_workers=8, # 8
             collate_fn=collate_fn,
             pin_memory=False,
             drop_last=True,
@@ -323,7 +323,7 @@ class RayPPOTrainer:
             if self.config.data.val_batch_size == -1
             else self.config.data.val_batch_size,
             shuffle=False,
-            num_workers=8,
+            num_workers=8, # 8
             collate_fn=collate_fn,
             pin_memory=False,
             drop_last=False,
@@ -663,10 +663,11 @@ class RayPPOTrainer:
             config=gen_config,
             is_validation = False,
         )
-
         for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
             for batch_dict in tqdm(self.train_dataloader, desc="Running step", position=1):
                 self.global_step += 1
+                # if self.global_step % 40 == 0:
+                # breakpoint() 
                 if self.global_step > self.training_steps:
                     break
                 metrics, timing_raw = {}, {}

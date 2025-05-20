@@ -1,0 +1,2 @@
+/data/tzhang/dataset/Infoseek/infoseek_images/infoseek_test_images/oven_05156049.jpg
+/data/tzhang/dataset/Infoseek/infoseek_images/infoseek_val_images/oven_05020405.jpg

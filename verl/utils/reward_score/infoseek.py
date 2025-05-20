@@ -244,7 +244,7 @@ def infoseek_compute_score(predict_str: str, ground_truth: list, problem_type: s
     else:
         raise NotImplementedError(f"Problem type {problem_type} is not supported.")
     return {
-        "overall": accuracy*(format+search_time),
+        "overall": accuracy+format,
         "search_times": search_time,
         "format": format,
         "accuracy": accuracy,

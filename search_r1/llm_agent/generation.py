@@ -76,9 +76,9 @@ class LLMGenerationManager:
         if self.config.no_think_rl:
             raise ValueError('stop')
             # if no_think_rl is enabled, only keep action in the str
-            # actions, _ = self.env.postprocess_predictions(responses_str)
-            # responses_str=[f"<answer>{envs[idx].ACTION_LOOKUP[action]}</answer>" for idx, action in enumerate(actions)]
-            # print("RESPONSES:", responses_str)
+            actions, _ = self.env.postprocess_predictions(responses_str)
+            responses_str=[f"<answer>{envs[idx].ACTION_LOOKUP[action]}</answer>" for idx, action in enumerate(actions)]
+            print("RESPONSES:", responses_str)
         responses = self._batch_tokenize(responses_str)
         return responses, responses_str
 
@@ -150,6 +150,7 @@ class LLMGenerationManager:
                 pad_to_left: bool = True
             ) -> torch.Tensor:
         """Concatenate tensors and handle padding. Additionally, create a mask (info_mask) to cover the information block if it exists."""
+        # breakpoint()
         pad_id = self.tokenizer.pad_token_id
         tensors = [prompt, response]
         tensors_with_mask = [prompt_with_mask, response]
@@ -368,6 +369,7 @@ class LLMGenerationManager:
                             # meta_info: Dict) -> Tuple[Dict, Dict]:
                             meta_info: Dict) -> DataProto:
         """Compose final generation output."""
+        # breakpoint()
         final_output = right_side.copy()
         final_output['prompts'] = left_side['input_ids']
 
@@ -406,7 +408,7 @@ class LLMGenerationManager:
         # final_output['response_mask'] = self.tensor_fn.create_attention_mask(
         #     final_output['responses']
         # )
-        # breakpoint()
+
         # responses_with_info_mask是对于ret info进行mask的responses
         # 这里给的是对检索信息进行mask的responses_mask
         final_output['attention_mask'] = torch.cat([
@@ -414,6 +416,7 @@ class LLMGenerationManager:
             self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
         ], dim=1)
         final_output['response_mask'] = self.tensor_fn.create_attention_mask(final_output['responses_with_info_mask'])
+
 
         final_output['position_ids'] = self.tensor_fn.create_position_ids(
             final_output['attention_mask']

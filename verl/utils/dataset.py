@@ -135,7 +135,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict: dict = self.dataset[index]
         prompt_str: str = row_dict[self.prompt_key]
         if self.system_prompt:
-            prompt_str = " ".join((self.system_prompt.strip(), prompt_str))
+            prompt_str = ": ".join((self.system_prompt.strip(), prompt_str))
 
         if self.image_key in row_dict:
             # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text

@@ -166,7 +166,7 @@ def compute_grpo_outcome_advantage(
 
     for i in range(bsz):
         scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
-
+    # 将标准化之后的scalar reward拓展到token级别
     scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
     return scores, scores
 
