@@ -14,10 +14,6 @@
 """
 Actor config
 """
-<<<<<<< HEAD
-=======
-
->>>>>>> upstream/main
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple

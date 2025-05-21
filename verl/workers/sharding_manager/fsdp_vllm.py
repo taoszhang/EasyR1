@@ -66,6 +66,31 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         for name, tensor in actor_weights.items():
             yield name, tensor.full_tensor() if self.world_size != 1 else tensor
 
+    # def __enter__(self):
+    #     if not self.is_model_loaded:
+    #         torch.cuda.empty_cache()
+    #         print_gpu_memory_usage("Before state_dict() in sharding manager")
+    #         actor_weights = self.module.state_dict()
+    #         print_gpu_memory_usage("After state_dict() in sharding manager")
+
+    #         self.inference_engine.wake_up()
+    #         model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
+    #         model.load_weights(self._make_weight_iterator(actor_weights))
+    #         print_gpu_memory_usage("After sync model weights in sharding manager")
+
+    #         del actor_weights
+    #         torch.cuda.empty_cache()
+    #         print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
+    #         # important: need to manually set the random states of each tp to be identical.
+    #         if self.device_mesh is not None:
+    #             self.torch_random_states = torch.cuda.get_rng_state()
+    #             torch.cuda.set_rng_state(self.gen_random_states)
+    #         print("ATTENTION: Model loaded and is_model_loaded set.")
+    #         self.is_model_loaded = True
+    #     else:
+    #         # if model is already loaded, we don't need to load it again
+    #         print("ATTENTION: Skip loading model weights in sharding manager")
+
     def __enter__(self):
         # NOTE: Basically, we only need `torch.cuda.empty_cache()` before vllm wake_up and
         # after vllm sleep, since vllm has its own caching memory allocator CuMemAllocator.
@@ -74,20 +99,27 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         #
         # pytorch: https://pytorch.org/docs/stable/notes/cuda.html#memory-management
         # vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/device_allocator/cumem.py#L103
-<<<<<<< HEAD
         if not self.is_model_loaded:
             torch.cuda.empty_cache()
             print_gpu_memory_usage("Before state_dict() in sharding manager")
-            actor_weights = self.module.state_dict()
+            actor_weights = get_model_state_dict(self.module)
             print_gpu_memory_usage("After state_dict() in sharding manager")
 
-            self.inference_engine.wake_up()
+            if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
+                self.inference_engine.wake_up(tags=["weights"])
+            else:
+                self.inference_engine.wake_up()
+
             model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
             model.load_weights(self._make_weight_iterator(actor_weights))
             print_gpu_memory_usage("After sync model weights in sharding manager")
 
             del actor_weights
             torch.cuda.empty_cache()
+
+            if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
+                self.inference_engine.wake_up(tags=["kv_cache"])
+
             print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
             # important: need to manually set the random states of each tp to be identical.
             if self.device_mesh is not None:
@@ -98,33 +130,6 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         else:
             # if model is already loaded, we don't need to load it again
             print("ATTENTION: Skip loading model weights in sharding manager")
-=======
-        torch.cuda.empty_cache()
-        print_gpu_memory_usage("Before state_dict() in sharding manager")
-        actor_weights = get_model_state_dict(self.module)
-        print_gpu_memory_usage("After state_dict() in sharding manager")
-
-        if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
-            self.inference_engine.wake_up(tags=["weights"])
-        else:
-            self.inference_engine.wake_up()
-
-        model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
-        model.load_weights(self._make_weight_iterator(actor_weights))
-        print_gpu_memory_usage("After sync model weights in sharding manager")
-
-        del actor_weights
-        torch.cuda.empty_cache()
-
-        if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
-            self.inference_engine.wake_up(tags=["kv_cache"])
-
-        print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
-        # important: need to manually set the random states of each tp to be identical.
-        if self.device_mesh is not None:
-            self.torch_random_states = torch.cuda.get_rng_state()
-            torch.cuda.set_rng_state(self.gen_random_states)
->>>>>>> upstream/main
 
     def __exit__(self, exc_type, exc_value, traceback):
         if not self.no_sleep and self.is_model_loaded:

@@ -31,7 +31,7 @@ from typing import Any, Dict, Generator, List, Tuple, Union
 #     ]
 #     return 1.0 if any(p.fullmatch(predict_str) for p in patterns) else 0.0
 
-def infoseek_format_reward(predict_str: str) -> float:
+def format_reward(predict_str: str) -> float:
     # 定义正则单元
     think_pattern = r"<think>.*?</think>"
     search_info_pattern = r"<search>.*?</search>\s*<information>.*?</information>"
@@ -72,7 +72,7 @@ def infoseek_format_reward(predict_str: str) -> float:
 
     return 1.0
 
-def infoseek_search_reward(predict_str: str) -> float:
+def search_reward(predict_str: str) -> float:
     # 统计 <search>.*?</search> 出现的次数
     # breakpoint()
     predict_str_clean = predict_str.replace("<search> and </search>", "") # 去掉invid部分的prompt
@@ -234,18 +234,28 @@ def infoseek_numerical_accuracy_reward(predict_str: str, ground_truth: list) -> 
 
     return 0.0
 
-def infoseek_compute_score(predict_str: str, ground_truth: list, problem_type: str) -> Dict[str, float]:
-    format = infoseek_format_reward(predict_str)
-    search_time = infoseek_search_reward(predict_str)
-    if problem_type == "String" or problem_type == "Time":
-        accuracy = infoseek_string_accuracy_reward(predict_str, ground_truth)
-    elif problem_type == "Numerical":
-        accuracy = infoseek_numerical_accuracy_reward(predict_str, ground_truth)
-    else:
-        raise NotImplementedError(f"Problem type {problem_type} is not supported.")
-    return {
-        "overall": accuracy+format,
-        "search_times": search_time,
-        "format": format,
-        "accuracy": accuracy,
-    }
+def compute_score(predicts, ground_truths) -> Dict[str, float]:
+    scores = []
+    for predict, ground_truth in zip(predicts, ground_truths):
+        problem_type = ground_truth.get("problem_type", None)
+        if problem_type is None:
+            raise ValueError("problem_type is not provided in ground_truth.")
+        answer_eval = ground_truth.get("answer_eval", None)
+        if answer_eval is None:
+            raise ValueError("answer_eval is not provided in ground_truth.")
+        
+        format = format_reward(predict)
+        search_time = search_reward(predict)
+        if problem_type == "String" or problem_type == "Time":
+            accuracy = infoseek_string_accuracy_reward(predict, answer_eval)
+        elif problem_type == "Numerical":
+            accuracy = infoseek_numerical_accuracy_reward(predict, answer_eval)
+        else:
+            raise NotImplementedError(f"Problem type {problem_type} is not supported.")
+        scores.append({
+            "overall": accuracy+format,
+            "search_times": search_time,
+            "format": format,
+            "accuracy": accuracy,
+        })
+    return scores

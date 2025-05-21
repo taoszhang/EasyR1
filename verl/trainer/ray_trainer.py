@@ -307,10 +307,10 @@ class RayPPOTrainer:
                 input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
                 sample_inputs.extend(input_texts)
 
-                if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
+                if "multi_modal_data" in test_batch.non_tensor_batch.keys():
                     test_gen_batch = test_batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                     )
                 else:
                     test_gen_batch = test_batch.pop(
@@ -332,7 +332,8 @@ class RayPPOTrainer:
                 test_batch = test_batch.union(test_output_gen_batch)
 
                 # evaluate using reward_function
-                reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+                # reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+                reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
 
                 # Store scores
                 scores = reward_tensor.sum(-1).cpu().tolist()
@@ -356,10 +357,11 @@ class RayPPOTrainer:
                 sample_ground_truths.extend([str(item) for item in test_batch.non_tensor_batch["ground_truth"]])
                 sample_answers.extend(test_batch.non_tensor_batch["answer"])
 
-                if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
+                if "multi_modal_data" in test_batch.non_tensor_batch.keys():
                     test_gen_batch = test_batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                        # non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                     )
                 else:
                     test_gen_batch = test_batch.pop(
@@ -368,7 +370,7 @@ class RayPPOTrainer:
                     )
                 
                 test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
-                
+                breakpoint()
                 with timer('step', timing_raw):
                     first_input_ids = test_gen_batch.batch['input_ids'][:, -gen_config.max_prompt_length:].clone()
                     with timer('gen', timing_raw):
@@ -377,7 +379,6 @@ class RayPPOTrainer:
                             gen_batch=test_gen_batch,
                             initial_input_ids=first_input_ids,
                         )
-
                     # Store generated outputs
                     output_ids = final_gen_batch_output.batch["responses"]
                     output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
@@ -386,7 +387,8 @@ class RayPPOTrainer:
                     test_batch = test_batch.union(final_gen_batch_output)
 
                     # evaluate using reward_function
-                    reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+                    # reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+                    reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
 
                     # Store scores
                     scores = reward_tensor.sum(-1).cpu().tolist()
@@ -396,8 +398,7 @@ class RayPPOTrainer:
                     for key, value in reward_metrics.items():
                         reward_metrics_lst[key].extend(value)             
 
-        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores, 
-                                        ground_truths=sample_ground_truths, answers=sample_answers)
+        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores, ground_truths=sample_ground_truths, answers=sample_answers)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         return {"val/reward_score": reward_score, **val_reward_metrics}
@@ -574,7 +575,7 @@ class RayPPOTrainer:
             config=gen_config,
             is_validation = False,
         )
-        for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
+        for _ in tqdm(range(self.config.trainer.total_epochs), desc="Epoch", position=0):
             for batch_dict in tqdm(self.train_dataloader, desc="Running step", position=1):
                 self.global_step += 1
                 # if self.global_step % 40 == 0:
@@ -643,19 +644,6 @@ class RayPPOTrainer:
                     batch = batch.union(gen_batch_output)
                     batch.non_tensor_batch.pop("multi_modal_data", None)
 
-                    # compute reward
-                    # with timer("reward", timing_raw):
-                    #     if self.use_reward_model:
-                    #         raise NotImplementedError("Reward model is not supported yet.")
-
-                    #     # we combine with rule-based rm
-                    #     reward_tensor, reward_metrics = self.reward_fn(batch)
-                    #     batch.batch["token_level_scores"] = reward_tensor
-                    #     reward_metrics = {
-                    #         f"reward/{key}": value for key, value in reduce_metrics(reward_metrics).items()
-                    #     }
-                    #     metrics.update(reward_metrics)
-
                     # balance the number of valid tokens on each dp rank.
                     # Note that this breaks the order of data inside the batch.
                     # Please take care when you implement group based adv computation such as GRPO and rloo
@@ -667,7 +655,7 @@ class RayPPOTrainer:
                     # compute reward
                     with timer("reward", timing_raw):
                         reward_ref = self.reward_fn.compute_reward.remote(batch)
-
+                    # breakpoint()
                     # recompute old_log_probs
                     with timer("old", timing_raw):
                         old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)

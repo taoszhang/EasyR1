@@ -101,7 +101,8 @@ class LLMGenerationManager:
     def _update_rolling_state(self, rollings, cur_responses: torch.Tensor, 
                             next_obs_ids: torch.Tensor) -> Dict:
         """Update rolling state with new responses and observations."""
-        # Concatenate and handle padding      
+        # Concatenate and handle padding     
+        # breakpoint() 
         new_input_ids = self.tensor_fn.concatenate_with_padding([
             rollings.batch['input_ids'],
             cur_responses,
@@ -123,7 +124,7 @@ class LLMGenerationManager:
         
         update_rolling_state['raw_prompt_ids'] = rollings.non_tensor_batch['raw_prompt_ids']
         update_rolling_state['multi_modal_data'] = rollings.non_tensor_batch['multi_modal_data']
-        update_rolling_state['multi_modal_inputs'] = rollings.non_tensor_batch['multi_modal_inputs']
+        # update_rolling_state['multi_modal_inputs'] = rollings.non_tensor_batch['multi_modal_inputs']
 
         # NOTE: 这里对raw_prompt_ids进行裁剪，计算image token的长度
         for i in range(rollings.batch.shape[0]):
@@ -281,6 +282,7 @@ class LLMGenerationManager:
             # gen_output = self._generate_with_gpu_padding(rollings_active)
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
             gen_batch.meta_info.update({'no_sleep': False})
+            # breakpoint()
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
             meta_info = gen_output.meta_info            
@@ -369,14 +371,15 @@ class LLMGenerationManager:
                             # meta_info: Dict) -> Tuple[Dict, Dict]:
                             meta_info: Dict) -> DataProto:
         """Compose final generation output."""
-        # breakpoint()
         final_output = right_side.copy()
         final_output['prompts'] = left_side['input_ids']
-
-        # 对于right_side['responses']，如果超过max_end_length，则进行裁剪，否则pad到max_end_length
+        
+        # 这里是为了强制pad到max response length, easy-r1框架需要输出达到最大的长度
+        # # 对于right_side['responses']，如果超过max_end_length，则进行裁剪，否则pad到max_end_length
         assert final_output['responses_with_info_mask'].shape[1] == final_output['responses'].shape[1]
         if final_output['responses'].shape[1] > self.config.max_end_length:
             final_output['responses'] = final_output['responses'][:, :self.config.max_end_length]
+
         elif final_output['responses'].shape[1] < self.config.max_end_length:
             padded_responses = torch.full(
                 (final_output['responses'].shape[0], self.config.max_end_length-final_output['responses'].shape[1]),

@@ -1,24 +1,15 @@
 set -x
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-MODEL_PATH=/data/tzhang/model/Qwen2.5-VL-3B-Instruct  # replace it with your local file path
-experiment_name=accuracy+format_new_data_3B_instruct
-save_path=/data/tzhang/outputs/EasyR1/checkpoints_format_num_redo/accuracy+format_new_data_3B_instruct
+MODEL_PATH=/data/tzhang/model/Qwen2.5-VL-7B-Instruct  # replace it with your local file path
+experiment_name=accuracy+format_new_clip
+save_path=/data/tzhang/outputs/EasyR1/checkpoints_format_num_redo/accuracy+format_new_clip
 load_checkpoint_path=
 mkdir -p ${save_path}
-
-SYSTEM_PROMPT="""<image>
- Answer the given question.
- You must conduct reasoning inside <think> and </think> first every time you get new information.
- After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search> and it will return the top searched results between <information> and </information>.
- You can search as many times as your want.
- If you find no further external knowledge needed, you can directly provide the answer inside <answer> and </answer>, without detailed illustrations. For example, <answer> Beijing </answer>. Question"""
-
 
 python3 -m verl.trainer.main \
     config=examples/config_test.yaml \
     data.train_files=/data/tzhang/project/Infoseek_multi_hop/infoseek_bridge_refine/infoseek_bridge_train_all_right \
     data.val_files=/data/tzhang/project/Infoseek_multi_hop/infoseek_bridge_parquet/infoseek_bridge_with_entity/infoseek_bridge_validation \
-    data.system_prompt="${SYSTEM_PROMPT}" \
     data.max_prompt_length=4096 \
     data.max_response_length=512 \
     data.max_start_length=2048 \
@@ -36,10 +27,9 @@ python3 -m verl.trainer.main \
     trainer.n_gpus_per_node=8 \
     trainer.save_checkpoint_path=${save_path} \
     trainer.load_checkpoint_path=${load_checkpoint_path} \
-    trainer.val_freq=20 \
+    trainer.val_freq=10 \
     trainer.val_before_train=false \
-    trainer.val_generations_to_log=20 \
-    trainer.save_freq=20 \
+    trainer.val_generations_to_log=10 \
+    trainer.save_freq=10 \
     retriever.url=http://127.0.0.1:8000/retrieve \
     retriever.topk=2 
-    

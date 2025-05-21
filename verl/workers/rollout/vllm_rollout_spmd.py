@@ -23,21 +23,12 @@ from tensordict import TensorDict
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
-<<<<<<< HEAD:verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
-from ....protocol import DataProto
-from ....utils import torch_functional as VF
-from ....utils.tokenizer import get_processor
-from ....utils.torch_dtypes import PrecisionType
-from ..base import BaseRollout
-from ..config import RolloutConfig
-=======
 from ...protocol import DataProto
 from ...utils import torch_functional as VF
 from ...utils.tokenizer import get_processor
 from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
->>>>>>> upstream/main:verl/workers/rollout/vllm_rollout_spmd.py
 
 
 def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
@@ -87,17 +78,11 @@ class vLLMRollout(BaseRollout):
             skip_tokenizer_init=False,
             trust_remote_code=config.trust_remote_code,
             load_format="dummy",
-<<<<<<< HEAD:verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
-            tensor_parallel_size=config.tensor_parallel_size,
-            dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
-            seed=config.seed,
-=======
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             seed=config.seed,
             max_model_len=config.max_model_len or config.prompt_length + config.response_length,
             distributed_executor_backend="external_launcher",
             tensor_parallel_size=config.tensor_parallel_size,
->>>>>>> upstream/main:verl/workers/rollout/vllm_rollout_spmd.py
             gpu_memory_utilization=config.gpu_memory_utilization,
             max_num_batched_tokens=config.max_num_batched_tokens,
             disable_log_stats=config.disable_log_stats,
@@ -106,11 +91,7 @@ class vLLMRollout(BaseRollout):
             limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
             disable_mm_preprocessor_cache=True,
             enable_chunked_prefill=config.enable_chunked_prefill,
-<<<<<<< HEAD:verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
-            limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
-=======
             enable_sleep_mode=True,
->>>>>>> upstream/main:verl/workers/rollout/vllm_rollout_spmd.py
         )
 
         # Offload vllm model to reduce peak memory usage

@@ -20,8 +20,8 @@ class TensorHelper:
         """Cut tensors to their effective length based on attention mask."""
         """A new function has been added, and the part exceeding the maximum length is truncated."""
         effective_len = tensor_dict['attention_mask'].sum(dim=1).max()
+        effective_len = min(self.config.max_start_length, effective_len)
         result = tensor_dict.copy()
-        # max_len = min(self.config.max_start_length, effective_len)
         
         # for key in keys:
         #     if cut_left:

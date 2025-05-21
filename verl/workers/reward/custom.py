@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+# 新版本中被废弃的代码。
 from collections import defaultdict
 from typing import Any, Callable, Dict, Tuple, TypedDict
 

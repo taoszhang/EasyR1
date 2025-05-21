@@ -121,9 +121,9 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         if os.path.isdir(data_path):
             # when we use dataset builder, we should always refer to the train split
-            self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
+            self.dataset = load_dataset("parquet", data_dir=data_path, split=data_split)
         elif os.path.isfile(data_path):
-            self.dataset = load_dataset("parquet", data_files=data_path, split="train")
+            self.dataset = load_dataset("parquet", data_files=data_path, split=data_split)
         else:
             # load remote dataset from huggingface hub
             self.dataset = load_dataset(data_path, split=data_split)
@@ -217,7 +217,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         example["attention_mask"] = attention_mask
         example["position_ids"] = position_ids
         example["raw_prompt_ids"] = raw_prompt_ids
-        example["ground_truth"] = example.pop(self.answer_key)
         if 'problem_type' in example:
-            example["problem_type"] = example.pop("problem_type")
+            example["ground_truth"] = {'problem_type': example.pop("problem_type"), "answer_eval": example.pop(self.answer_key)}
+        else:  
+            example["ground_truth"] = {"answer_eval": example.pop(self.answer_key)}
         return example

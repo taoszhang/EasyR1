@@ -53,17 +53,9 @@ from ..utils.fsdp_utils import (
 from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
-<<<<<<< HEAD
-from ..utils.torch_functional import get_constant_schedule_with_warmup
-# from .actor import DataParallelPPOActor
-from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
-# from .critic import DataParallelPPOCritic
-from .rollout.vllm_rollout import vLLMRollout
-=======
 from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup
 from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
 from .rollout import vLLMRollout
->>>>>>> upstream/main
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
@@ -287,15 +279,6 @@ class FSDPWorker(Worker):
         print_gpu_memory_usage("After FSDP module init")
 
         if self._is_actor or self._is_critic:
-<<<<<<< HEAD
-            self.optimizer = torch.optim.AdamW(
-                self.fsdp_module.parameters(),
-                lr=optim_config.lr,
-                betas=optim_config.betas,
-                weight_decay=optim_config.weight_decay,
-                fused=True,
-            )
-=======
             if optim_config.strategy == "adamw":
                 self.optimizer = torch.optim.AdamW(
                     filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
@@ -314,7 +297,6 @@ class FSDPWorker(Worker):
             else:
                 raise NotImplementedError(f"Optimizer {optim_config.strategy} not supported.")
 
->>>>>>> upstream/main
             num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
             self.lr_scheduler = get_constant_schedule_with_warmup(
                 optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
@@ -382,10 +364,6 @@ class FSDPWorker(Worker):
 
         if self._is_actor:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
-<<<<<<< HEAD
-=======
-
->>>>>>> upstream/main
             self.actor = DataParallelPPOActor(
                 config=self.config.actor,
                 actor_module=self.fsdp_module,
@@ -394,10 +372,6 @@ class FSDPWorker(Worker):
 
         if self._is_critic:
             from .critic.dp_critic import DataParallelPPOCritic  # lazy import
-<<<<<<< HEAD
-=======
-
->>>>>>> upstream/main
             self.critic = DataParallelPPOCritic(
                 config=self.config,
                 critic_module=self.fsdp_module,
@@ -409,10 +383,6 @@ class FSDPWorker(Worker):
 
         if self._is_ref:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
-<<<<<<< HEAD
-=======
-
->>>>>>> upstream/main
             self.ref_policy = DataParallelPPOActor(
                 config=self.config.ref,
                 actor_module=self.fsdp_module,
