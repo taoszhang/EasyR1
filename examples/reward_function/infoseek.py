@@ -36,9 +36,10 @@ def format_reward(predict_str: str) -> float:
     think_pattern = r"<think>.*?</think>"
     search_info_pattern = r"<search>.*?</search>\s*<information>.*?</information>"
     answer_pattern = r"<answer>.*?</answer>"
+    search_img_pattern = r"<image_search>.*?</image_search>\s*<information>.*?</information>"
 
     # 编译单元表达式（用于匹配顺序）
-    unit_pattern = f"({think_pattern})|({search_info_pattern})|({answer_pattern})"
+    unit_pattern = f"({think_pattern})|({search_info_pattern})|({search_img_pattern})|({answer_pattern})"
     unit_re = re.compile(unit_pattern, re.DOTALL)
 
     # 匹配整个输入
@@ -57,6 +58,8 @@ def format_reward(predict_str: str) -> float:
         elif m.group(2):
             sequence.append('S')
         elif m.group(3):
+            sequence.append('I')
+        elif m.group(4):
             sequence.append('A')
 
     # 规则检测
@@ -78,7 +81,27 @@ def search_reward(predict_str: str) -> float:
     predict_str_clean = predict_str.replace("<search> and </search>", "") # 去掉invid部分的prompt
     pattern = re.compile(r"<search>.*?</search>", re.DOTALL)
     search_matches = re.findall(pattern, predict_str_clean)
-    return float(len(search_matches))  # 返回 <search> 标签出现的次数
+    return float(len(search_matches))
+
+
+def image_search_reward(predict_str: str) -> float:
+    """Calculate the reward for image search in the prediction string.
+
+    Args:
+        predict_str: The prediction string containing the image search tags.
+
+    Returns:
+        float: The reward score based on the presence of image search tags.
+    """
+    # Count occurrences of <image_search> and </image_search>
+    pattern = re.compile(r"<image_search>.*?</image_search>", re.DOTALL)
+    matches = re.findall(pattern, predict_str)
+    
+    # Return the number of image search tags found
+    if len(matches) == 1:
+        return 1.0
+    else:
+        return 0.0
 
 def normalize_answer(text: str) -> str:
     """Normalize a given text by removing articles, punctuation, and white spaces, and converting to lowercase."""
@@ -236,6 +259,7 @@ def infoseek_numerical_accuracy_reward(predict_str: str, ground_truth: list) -> 
 
 def compute_score(predicts, ground_truths) -> Dict[str, float]:
     scores = []
+    # breakpoint()
     for predict, ground_truth in zip(predicts, ground_truths):
         problem_type = ground_truth.get("problem_type", None)
         if problem_type is None:
@@ -246,16 +270,20 @@ def compute_score(predicts, ground_truths) -> Dict[str, float]:
         
         format = format_reward(predict)
         search_time = search_reward(predict)
+        image_search_time = image_search_reward(predict)
         if problem_type == "String" or problem_type == "Time":
             accuracy = infoseek_string_accuracy_reward(predict, answer_eval)
         elif problem_type == "Numerical":
             accuracy = infoseek_numerical_accuracy_reward(predict, answer_eval)
         else:
             raise NotImplementedError(f"Problem type {problem_type} is not supported.")
-        scores.append({
-            "overall": accuracy+format,
+        scores.append(
+            {
+            "overall": accuracy+format+image_search_time,
             "search_times": search_time,
+            "image_search_times": image_search_time,
             "format": format,
             "accuracy": accuracy,
-        })
+            }
+        )
     return scores

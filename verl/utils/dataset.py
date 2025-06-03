@@ -221,4 +221,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             example["ground_truth"] = {'problem_type': example.pop("problem_type"), "answer_eval": example.pop(self.answer_key)}
         else:  
             example["ground_truth"] = {"answer_eval": example.pop(self.answer_key)}
+        if 'ret_img' in example:
+            example["ret_img"] = example.pop("ret_img")
+        if 'ret_img_score' in example:
+            example["ret_img_score"] = example.pop("ret_img_score")
         return example

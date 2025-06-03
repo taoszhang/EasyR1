@@ -80,7 +80,7 @@ class ActorConfig:
     max_grad_norm: float = 1.0
     clip_ratio_low: float = 0.2
     clip_ratio_high: float = 0.3
-    clip_ratio_dual: float = 3.0
+    clip_ratio_dual: float = 3
     ppo_epochs: int = 1
     padding_free: bool = False
     ulysses_sequence_parallel_size: int = 1

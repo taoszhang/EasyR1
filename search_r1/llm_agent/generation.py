@@ -43,6 +43,8 @@ class LLMGenerationManager:
         # self.logger = logger
         self.is_validation = is_validation
         self.rollout_n = 1
+        self.ret_img = None
+        self.ret_img_score = None
 
         self.tensor_fn = TensorHelper(TensorConfig(
             pad_token_id=tokenizer.pad_token_id,
@@ -66,7 +68,9 @@ class LLMGenerationManager:
             responses, 
             skip_special_tokens=True
         )
-        responses_str = [resp.split('</search>')[0] + '</search>'
+        responses_str = [ resp.split('</image_search>')[0] + '</image_search>'
+                 if '</image_search>' in resp
+                 else resp.split('</search>')[0] + '</search>'
                  if '</search>' in resp 
                  else resp.split('</answer>')[0] + '</answer>'
                  if '</answer>' in resp 
@@ -173,7 +177,7 @@ class LLMGenerationManager:
                           cur_responses: torch.Tensor,
                           next_obs_ids: torch.Tensor = None) -> Dict:
         """Update right side state."""
-        if next_obs_ids != None:
+        if next_obs_ids != None and next_obs_ids.shape[1] > 0:
             responses, responses_with_info_mask = self._info_masked_concatenate_with_padding(
                     right_side['responses'],
                     right_side['responses_with_info_mask'],
@@ -189,7 +193,7 @@ class LLMGenerationManager:
                     pad_to_left=False
                 )
         effective_len = self.tensor_fn.create_attention_mask(responses).sum(dim=1).max()
-        max_len = min(self.config.max_prompt_length, effective_len)
+        max_len = min(self.config.max_end_length, effective_len)
         
         return {'responses': responses[:, :max_len], 'responses_with_info_mask': responses_with_info_mask[:, :max_len]}
 
@@ -254,12 +258,19 @@ class LLMGenerationManager:
 
     def run_llm_loop(self, gen_batch, initial_input_ids: torch.Tensor) -> Tuple[Dict, Dict]:
         """Run main LLM generation loop."""
-        original_left_side = {'input_ids': initial_input_ids[:, -self.config.max_prompt_length:]}
-        original_right_side = {'responses': initial_input_ids[:, []], 'responses_with_info_mask': initial_input_ids[:, []]}
+        if 'ret_img' in gen_batch.non_tensor_batch:
+            self.ret_img = gen_batch.non_tensor_batch.pop('ret_img')
+            self.ret_img = np.repeat(self.ret_img, repeats=self.config.rollout_n, axis=0)
+            self.ret_img_score = gen_batch.non_tensor_batch.pop('ret_img_score')
+            self.ret_img_score = np.repeat(self.ret_img_score, repeats=self.config.rollout_n, axis=0)
+
+        original_left_side = {'input_ids': initial_input_ids[:, -self.config.max_prompt_length:].long()}
+        original_right_side = {'responses': initial_input_ids[:, []].long(), 'responses_with_info_mask': initial_input_ids[:, []].long()}
         if not self.is_validation:
             original_left_side['input_ids'] = original_left_side['input_ids'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
             original_right_side['responses'] = original_right_side['responses'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
             original_right_side['responses_with_info_mask'] = original_right_side['responses_with_info_mask'].repeat_interleave(repeats=self.config.rollout_n, dim=0)
+            
 
         active_mask = torch.ones(gen_batch.batch['input_ids'].shape[0], dtype=torch.bool)
         # turns_stats = torch.ones(gen_batch.batch['input_ids'].shape[0] * self.config.rollout_n, dtype=torch.int)
@@ -281,7 +292,7 @@ class LLMGenerationManager:
 
             # gen_output = self._generate_with_gpu_padding(rollings_active)
             gen_batch, pad_size = pad_dataproto_to_divisor(rollings_active, self.actor_rollout_wg.world_size)
-            gen_batch.meta_info.update({'no_sleep': False})
+            gen_batch.meta_info.update({'no_sleep': True})
             # breakpoint()
             gen_output = self.actor_rollout_wg.generate_sequences(gen_batch)
             gen_output = unpad_dataproto(gen_output, pad_size=pad_size)
@@ -310,7 +321,6 @@ class LLMGenerationManager:
             # valid_search_stats += torch.tensor(is_search, dtype=torch.int)
 
             next_obs_ids = self._process_next_obs(next_obs)
-            
             # Update states  
             rollings = self._update_rolling_state(
                 rollings,
@@ -362,7 +372,7 @@ class LLMGenerationManager:
         # meta_info['active_mask'] = active_mask.tolist()
         # meta_info['valid_action_stats'] = valid_action_stats.tolist()
         # meta_info['valid_search_stats'] = valid_search_stats.tolist()
-        
+        # breakpoint()
         print("ACTIVE_TRAJ_NUM:", active_num_list)
         return self._compose_final_output(original_left_side, original_right_side, meta_info)
 
@@ -379,22 +389,23 @@ class LLMGenerationManager:
         assert final_output['responses_with_info_mask'].shape[1] == final_output['responses'].shape[1]
         if final_output['responses'].shape[1] > self.config.max_end_length:
             final_output['responses'] = final_output['responses'][:, :self.config.max_end_length]
+            final_output['responses_with_info_mask'] = final_output['responses_with_info_mask'][:, :self.config.max_end_length]
 
-        elif final_output['responses'].shape[1] < self.config.max_end_length:
-            padded_responses = torch.full(
-                (final_output['responses'].shape[0], self.config.max_end_length-final_output['responses'].shape[1]),
-                self.tokenizer.pad_token_id,
-                dtype=final_output['responses'].dtype,
-                device=final_output['responses'].device
-            )
-            final_output['responses'] = torch.cat([
-                final_output['responses'],
-                padded_responses
-            ], dim=1)
-            final_output['responses_with_info_mask'] = torch.cat([
-                final_output['responses_with_info_mask'],
-                padded_responses
-            ], dim=1)
+        # elif final_output['responses'].shape[1] < self.config.max_end_length:
+        #     padded_responses = torch.full(
+        #         (final_output['responses'].shape[0], self.config.max_end_length-final_output['responses'].shape[1]),
+        #         self.tokenizer.pad_token_id,
+        #         dtype=final_output['responses'].dtype,
+        #         device=final_output['responses'].device
+        #     )
+        #     final_output['responses'] = torch.cat([
+        #         final_output['responses'],
+        #         padded_responses
+        #     ], dim=1)
+        #     final_output['responses_with_info_mask'] = torch.cat([
+        #         final_output['responses_with_info_mask'],
+        #         padded_responses
+        #     ], dim=1)
         
         # Combine input IDs
         final_output['input_ids'] = torch.cat([
@@ -424,7 +435,6 @@ class LLMGenerationManager:
         final_output['position_ids'] = self.tensor_fn.create_position_ids(
             final_output['attention_mask']
         )
-        
         final_output = DataProto.from_single_dict(final_output, meta_info=meta_info)
         return final_output
 
@@ -470,6 +480,15 @@ class LLMGenerationManager:
                     dones.append(0)
                     valid_action.append(1)
                     is_search.append(1)
+                elif action == 'image_search':
+                    prompt_img_score = 'The possible entities shown in the image and their probabilities are: {}:{}, {}:{}, {}:{}\n'.format(self.ret_img[i][0], self.ret_img_score[i][0],
+                                                                                                        self.ret_img[i][1], self.ret_img_score[i][1],
+                                                                                                        self.ret_img[i][2], self.ret_img_score[i][2])
+                    next_obs.append(f'\n\n<information>{prompt_img_score}</information>\n\n')
+                    # next_obs.append(f'\n\n<information>This image shows {self.ret_img[i][0]}</information>\n\n')
+                    dones.append(0)
+                    valid_action.append(1)
+                    is_search.append(1)
                 else:
                     next_obs.append(f'\nMy previous action is invalid. \
 If I want to search, I should put the query between <search> and </search>. \
@@ -497,7 +516,8 @@ If I want to give the final answer, I should put the answer between <answer> and
                 
         for prediction in predictions:
             if isinstance(prediction, str): # for llm output
-                pattern = r'<(search|answer)>(.*?)</\1>'
+                # pattern = r'<(search|answer)>(.*?)</\1>'
+                pattern = r'<(search|answer|image_search)>(.*?)</\1>'
                 match = re.search(pattern, prediction, re.DOTALL)
                 if match:
                     content = match.group(2).strip()  # Return only the content inside the tags

@@ -342,7 +342,8 @@ def compute_policy_loss(
     pg_loss = -advantages * ratio
     pg_loss2 = -advantages * clipped_ratio
     pg_loss3 = -advantages * clip_ratio_dual
-
+    print(f"clipped_ratio: {clipped_ratio.mean()}, ratio: {ratio.mean()}, clip_ratio_dual: {clip_ratio_dual}")
+    
     clipped_pg_loss_higher = torch.max(pg_loss, pg_loss2)  # clip if pg_loss < pg_loss2
     pg_clipfrac_higher = (pg_loss < pg_loss2).float()
     clipped_pg_loss_lower = torch.min(clipped_pg_loss_higher, pg_loss3)  # clip if pg_loss > pg_loss3 and adv < 0

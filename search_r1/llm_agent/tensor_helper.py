@@ -53,7 +53,14 @@ class TensorHelper:
     def concatenate_with_padding(self, tensors: List[torch.Tensor], 
                                pad_to_left: bool = True) -> torch.Tensor:
         """Concatenate tensors and handle padding."""
-        concatenated = torch.cat(tensors, dim=1)
+        valid_tensors = [t for t in tensors if t.size(1) > 0]
+        if len(valid_tensors) == 0:
+            # 所有输入都为空，返回一个 shape 为 (B, 0) 的空 tensor
+            # 假设原始 tensors 至少一个非空，可以用 tensors[0].size(0)
+            batch_size = tensors[0].size(0)
+            return torch.empty((batch_size, 0), dtype=tensors[0].dtype, device=tensors[0].device)
+        
+        concatenated = torch.cat(valid_tensors, dim=1)
         padded_tensor, _ = self.convert_pad_structure(concatenated, pad_to_left)
         return padded_tensor
 

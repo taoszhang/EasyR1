@@ -259,7 +259,6 @@ class RayPPOTrainer:
         """Log a table of validation samples"""
         if self.config.trainer.val_generations_to_log <= 0:
             return
-        # breakpoint()
         # Create tuples of (input, output, score) and sort by input text
         samples = list(zip(inputs, outputs, scores, ground_truths, answers))
         samples.sort(key=lambda x: x[0])  # Sort by input text
@@ -357,10 +356,15 @@ class RayPPOTrainer:
                 sample_ground_truths.extend([str(item) for item in test_batch.non_tensor_batch["ground_truth"]])
                 sample_answers.extend(test_batch.non_tensor_batch["answer"])
 
-                if "multi_modal_data" in test_batch.non_tensor_batch.keys():
+                if "multi_modal_data" in test_batch.non_tensor_batch.keys() and "ret_img" in test_batch.non_tensor_batch.keys():
                     test_gen_batch = test_batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
-                        # non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "ret_img", "ret_img_score"],
+                        # non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                    )
+                elif "multi_modal_data" in test_batch.non_tensor_batch.keys():
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                     )
                 else:
@@ -370,7 +374,6 @@ class RayPPOTrainer:
                     )
                 
                 test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
-                breakpoint()
                 with timer('step', timing_raw):
                     first_input_ids = test_gen_batch.batch['input_ids'][:, -gen_config.max_prompt_length:].clone()
                     with timer('gen', timing_raw):
@@ -379,6 +382,9 @@ class RayPPOTrainer:
                             gen_batch=test_gen_batch,
                             initial_input_ids=first_input_ids,
                         )
+
+                    for key in final_gen_batch_output.batch.keys():
+                        final_gen_batch_output.batch[key] = final_gen_batch_output.batch[key].long()
                     # Store generated outputs
                     output_ids = final_gen_batch_output.batch["responses"]
                     output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
@@ -586,7 +592,13 @@ class RayPPOTrainer:
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
 
                 # pop those keys for generation
-                if "multi_modal_data" in batch.non_tensor_batch.keys():
+                if "multi_modal_data" in batch.non_tensor_batch.keys() and "ret_img" in batch.non_tensor_batch.keys():
+                    gen_batch = batch.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "ret_img", "ret_img_score"],
+                        # non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                    )
+                elif "multi_modal_data" in batch.non_tensor_batch.keys():
                     gen_batch = batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
@@ -601,7 +613,6 @@ class RayPPOTrainer:
                 gen_meta_info = {'n': self.config.worker.rollout.n,
                                  'temperature': self.config.worker.rollout.temperature}
                 gen_batch.meta_info.update(gen_meta_info)
-
 
                 with timer("step", timing_raw):
                     if not self.config.retriever.do_search:
@@ -651,11 +662,12 @@ class RayPPOTrainer:
 
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
-
+                    # breakpoint()
                     # compute reward
                     with timer("reward", timing_raw):
-                        reward_ref = self.reward_fn.compute_reward.remote(batch)
-                    # breakpoint()
+                        # reward_ref = self.reward_fn.compute_reward.remote(batch)
+                        reward_tensor, reward_metrics = ray.get(self.reward_fn.compute_reward.remote(batch))
+                    
                     # recompute old_log_probs
                     with timer("old", timing_raw):
                         old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
@@ -675,7 +687,7 @@ class RayPPOTrainer:
 
                     with timer("adv", timing_raw):
                         # get token level scores
-                        reward_tensor, reward_metrics = ray.get(reward_ref)
+                        # reward_tensor, reward_metrics = ray.get(reward_ref)
                         batch.batch["token_level_scores"] = reward_tensor
                         reward_metrics = {f"reward/{k}": v for k, v in reduce_metrics(reward_metrics).items()}
                         metrics.update(reward_metrics)
