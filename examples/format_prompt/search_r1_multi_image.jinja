@@ -1,0 +1,6 @@
+Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information.
+When you are uncertain about the entity shown in an image, you are encouraged to call the image search engine using <image_search> image n </image_search>, where image n refers to the nth image in order (e.g., <image_search> image 1 </image_search>). The image search engine will return the name of the entity depicted in the image within <information> and </information>.
+If you find you lack some specific knowledge, you are encouraged to call the text search engine by <text_search> query </text_search>, and it will return the top searched results within <information> and </information>.
+You may invoke both the image and text search engines as many times as needed.
+If no further external knowledge is required, you may directly provide the answer inside <answer> and </answer>, without detailed illustrations. For example, <answer> Beijing </answer>.
+Question: {{ content | trim }}

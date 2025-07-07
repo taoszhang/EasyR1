@@ -99,13 +99,12 @@ class RLHFDataset(Dataset):
         answer_key: str = "answer",
         image_key: str = "images",
         video_key: str = "videos",
-        image_dir: Optional[str] = None,
         video_fps: float = 2.0,
         max_prompt_length: int = 1024,
         truncation: str = "error",
         format_prompt: Optional[str] = None,
-        min_pixels: Optional[int] = None,
         max_pixels: Optional[int] = None,
+        min_pixels: Optional[int] = None,
         filter_overlong_prompts: bool = True,
         filter_overlong_prompts_workers: int = 16,
     ):
@@ -115,25 +114,30 @@ class RLHFDataset(Dataset):
         self.answer_key = answer_key
         self.image_key = image_key
         self.video_key = video_key
-        self.image_dir = image_dir
         self.video_fps = video_fps
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
-        self.min_pixels = min_pixels
         self.max_pixels = max_pixels
+        self.min_pixels = min_pixels
+        self.filter_overlong_prompts = filter_overlong_prompts
 
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
         else:
             data_split = "train"
 
+        if 'train' in data_path:
+            data_split = "train"
+        elif 'val' in data_path:
+            data_split = "validation"
+        elif 'test' in data_path:
+            data_split = "test" 
+
         if os.path.isdir(data_path):
             # when we use dataset builder, we should always refer to the train split
-            file_type = os.path.splitext(os.listdir(data_path)[0])[-1][1:].replace("jsonl", "json")
-            self.dataset = load_dataset(file_type, data_dir=data_path, split=data_split)
+            self.dataset = load_dataset("parquet", data_dir=data_path, split=data_split)
         elif os.path.isfile(data_path):
-            file_type = os.path.splitext(data_path)[-1][1:].replace("jsonl", "json")
-            self.dataset = load_dataset(file_type, data_files=data_path, split=data_split)
+            self.dataset = load_dataset("parquet", data_files=data_path, split=data_split)
         else:
             # load remote dataset from huggingface hub
             self.dataset = load_dataset(data_path, split=data_split)
@@ -185,8 +189,8 @@ class RLHFDataset(Dataset):
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             images = example[self.image_key]
-            if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
-                images = [os.path.join(self.image_dir, image) for image in images]
+            # if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
+            #     images = [os.path.join(self.image_dir, image) for image in images]
 
             processed_images = [] if len(images) != 0 else None  # text-only data
             for image in images:
@@ -221,18 +225,16 @@ class RLHFDataset(Dataset):
 
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            # images = [process_image(image, self.min_pixels, self.max_pixels) for image in example.pop(self.image_key)]
             images = example.pop(self.image_key)
-            if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
-                images = [os.path.join(self.image_dir, image) for image in images]
-
             processed_images = [] if len(images) != 0 else None  # text-only data
             for image in images:
                 processed_images.append(process_image(image, self.min_pixels, self.max_pixels))
-
             model_inputs = self.processor(processed_images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
             example["multi_modal_data"] = {"images": images}
+            # example["multi_modal_inputs"] = dict(model_inputs)
         elif self.video_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             videos = example.pop(self.video_key)
@@ -298,5 +300,23 @@ class RLHFDataset(Dataset):
         example["attention_mask"] = attention_mask
         example["position_ids"] = position_ids
         example["raw_prompt_ids"] = raw_prompt_ids
-        example["ground_truth"] = example.pop(self.answer_key)
+        if 'problem_type' in example:
+            example["ground_truth"] = {'problem_type': example.pop("problem_type"), "answer_eval": example.pop(self.answer_key)}
+        else:  
+            example["ground_truth"] = {"answer_eval": example.pop(self.answer_key)}
+        
+        # 目前这是对于bridge而言，单图的检索结果，后续需要对compare的检索结果进行兼容。
+        if 'ret_img' in example:
+            example["ret_img"] = example.pop("ret_img")
+        if 'ret_img_score' in example:
+            example["ret_img_score"] = example.pop("ret_img_score")
+        
+        # 返回实体名称，把两种实体的名称统一更改为列表的形式。
+        if 'entity' in example and 'entity_bridge' in example:
+            example["entity"] = [example.pop("entity"), example.pop("entity_bridge")]
+        elif 'entity' in example and 'entity_compare' in example:
+            example["entity"] = [example.pop("entity"), example.pop("entity_compare")]
+        elif 'entity' in example:
+            example["entity"] = [example.pop("entity")]
+
         return example

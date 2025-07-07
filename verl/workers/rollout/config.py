@@ -26,6 +26,7 @@ class RolloutConfig:
     temperature: float = 1.0
     top_p: float = 1.0
     top_k: int = -1
+    repetition_penalty: float = 1.0
     seed: int = 1
     limit_images: int = 0
     dtype: str = "bf16"
@@ -39,7 +40,7 @@ class RolloutConfig:
     disable_log_stats: bool = True
     disable_tqdm: bool = False
     val_override_config: Dict[str, Any] = field(default_factory=dict)
-    # below are auto keys
+    """auto keys"""
     prompt_length: int = field(default=-1, init=False)
     response_length: int = field(default=-1, init=False)
     trust_remote_code: bool = field(default=False, init=False)

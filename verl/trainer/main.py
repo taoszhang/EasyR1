@@ -11,9 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import os
 import json
-
 import ray
 from omegaconf import OmegaConf
 
@@ -23,8 +22,14 @@ from ..workers.fsdp_workers import FSDPWorker
 from ..workers.reward import BatchFunctionRewardManager, SequentialFunctionRewardManager
 from .config import PPOConfig
 from .data_loader import create_dataloader
-from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
+from .ray_trainer_dapo import RayPPOTrainer, ResourcePoolManager, Role
 
+# Add RAY_DEBUG environment variable to enable Ray Debugger
+# os.environ["RAY_usage_threshold"] = "0.99"
+# ray.init(
+#     runtime_env={"env_vars": {"RAY_DEBUG": "1"},},
+#     # local_mode=True
+# )
 
 # please make sure main_task is not scheduled on head
 @ray.remote(num_cpus=1)
@@ -49,7 +54,7 @@ class Runner:
             use_fast=True,
         )
 
-        # define worker classes
+        # define worker classes 更新之后的代码，直接开始不再注册ref model，直接用一个actor_rollout_ref代替了两个模型？？那这样的话KL散度是怎么计算出来的呢？？？
         ray_worker_group_cls = RayWorkerGroup
         role_worker_mapping = {
             Role.ActorRolloutRef: ray.remote(FSDPWorker),
@@ -73,8 +78,10 @@ class Runner:
             raise NotImplementedError(f"Unknown reward type {config.worker.reward.reward_type}.")
 
         RemoteRewardManager = ray.remote(RewardManager).options(num_cpus=config.worker.reward.num_cpus)
-        reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
-        val_reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+        # reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+        # val_reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+        reward_fn = RemoteRewardManager.remote(config, tokenizer)
+        val_reward_fn = RemoteRewardManager.remote(config, tokenizer)
 
         train_dataloader, val_dataloader = create_dataloader(config.data, tokenizer, processor)
 
@@ -116,6 +123,7 @@ def main():
                 "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
                 "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
                 "PYTHONUNBUFFERED": "1",
+                # "WANDB_MODE": "disabled"
             }
         }
         ray.init(runtime_env=runtime_env)
