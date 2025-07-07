@@ -18,6 +18,7 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import json
 import os
+import gc
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -47,6 +48,10 @@ from . import core_algos
 from .config import PPOConfig
 from .core_algos import AdvantageEstimator, FixedKLController, KLController, compute_kl, get_kl_controller
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
+
+from search_r1.llm_agent.generation import LLMGenerationManager, GenerationConfig
+
+WorkerType = Type[Worker]
 
 
 class Role(IntEnum):
@@ -149,7 +154,6 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
     data.batch["advantages"] = advantages
     data.batch["returns"] = returns
     return data
-
 
 class RayPPOTrainer:
     """
@@ -558,6 +562,20 @@ class RayPPOTrainer:
             self.logger.log(data=val_metrics, step=self.global_step)
             if self.config.trainer.val_only:
                 return
+        # import ipdb; ipdb.set_trace()
+        gen_config = GenerationConfig(
+            max_turns=self.config.retriever.max_turns, # NOTE:最大的检索调用次数
+            max_start_length=self.config.data.max_start_length, # NOTE: 最大的起始token的长度
+            max_prompt_length=self.config.data.max_prompt_length,
+            max_response_length=self.config.data.max_response_length,
+            max_obs_length=self.config.data.max_obs_length, # NOTE: 跟环境的一次交互中最大的响应长度
+            max_end_length=self.config.data.max_end_length,
+            num_gpus=self.config.trainer.n_gpus_per_node,
+            no_think_rl=self.config.retriever.no_think_rl,
+            search_url = self.config.retriever.url,
+            topk = self.config.retriever.topk,
+            rollout_n = self.config.worker.rollout.n,
+        )
 
         self.data_iterator = iter(self.train_dataloader)
         while self.global_step < self.training_steps:
@@ -675,7 +693,11 @@ class RayPPOTrainer:
                 val_metrics = self._validate()
                 self.logger.log(data=val_metrics, step=self.global_step)
 
+                torch.cuda.empty_cache()
+                gc.collect()
             print(f"Final validation metrics: {convert_dict_to_str(val_metrics)}")
 
         if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()
+            torch.cuda.empty_cache()
+            gc.collect()

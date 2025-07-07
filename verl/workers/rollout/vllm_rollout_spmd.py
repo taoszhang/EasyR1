@@ -38,6 +38,13 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
     else:
         return np.repeat(value, repeats, axis=0)
 
+def _get_logit_bias(model_path: str, trust_remote_code: bool) -> Optional[Dict[int, float]]:
+    processor = get_processor(model_path, trust_remote_code=trust_remote_code)
+    if processor is not None and hasattr(processor, "image_token"):
+        image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
+        return {image_token_id: -100}
+    else:
+        return None
 
 def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[Dict[int, float]]:
     # enforce vllm to not output image token

@@ -43,6 +43,9 @@ class DataConfig:
     video_fps: float = 2.0
     max_prompt_length: int = 512
     max_response_length: int = 512
+    max_start_length: int = 512
+    max_obs_length: int = 512
+    max_end_length: int = 512
     rollout_batch_size: int = 512
     mini_rollout_batch_size: Optional[int] = None
     val_batch_size: int = -1
@@ -104,6 +107,16 @@ class AlgorithmConfig:
 
 
 @dataclass
+class RetrieverConfig:
+    url: str = ""
+    topk: int = 3
+    no_think_rl: bool = False
+    max_turns: int = 5
+    do_search: bool = True
+    start_state_marker: str = "<information>"
+    end_state_marker: str = "</information>"
+
+@dataclass
 class TrainerConfig:
     total_epochs: int = 15
     """total epochs for training"""
@@ -154,13 +167,13 @@ class TrainerConfig:
                 print(f"Model checkpoint {self.load_checkpoint_path} not found.")
                 self.load_checkpoint_path = None
 
-
 @dataclass
 class PPOConfig:
     data: DataConfig = field(default_factory=DataConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
 
     def post_init(self):
         self.worker.rollout.prompt_length = self.data.max_prompt_length

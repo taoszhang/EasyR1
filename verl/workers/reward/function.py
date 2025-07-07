@@ -84,7 +84,8 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         response_ids = data.batch["responses"]
-        response_length = data.batch["response_mask"].sum(dim=-1)
+        # response_length = data.batch["response_mask"].sum(dim=-1)
+        response_length = data.batch["response_mask"].size(1) - torch.argmax(data.batch["response_mask"].flip(dims=[1]), dim=1)
         for i in range(len(data)):
             valid_response_ids = response_ids[i][: response_length[i]]
             response_str = self.tokenizer.decode(
@@ -110,7 +111,8 @@ class BatchFunctionRewardManager(FunctionRewardManager):
     def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
         reward_inputs = []
         response_ids = data.batch["responses"]
-        response_length = data.batch["response_mask"].sum(dim=-1)
+        # response_length = data.batch["response_mask"].sum(dim=-1)
+        response_length = data.batch["response_mask"].size(1) - torch.argmax(data.batch["response_mask"].flip(dims=[1]), dim=1)
         for i in range(len(data)):
             valid_response_ids = response_ids[i][: response_length[i]]
             response_str = self.tokenizer.decode(

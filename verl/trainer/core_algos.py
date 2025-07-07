@@ -172,6 +172,7 @@ def compute_grpo_outcome_advantage(
             shape: (bs, response_length)
 
     """
+    # response_length = token_level_rewards.shape[-1]
     scores = token_level_rewards.sum(dim=-1)
     id2score = defaultdict(list)
     id2mean, id2std = {}, {}
@@ -188,6 +189,7 @@ def compute_grpo_outcome_advantage(
     for i in range(bsz):
         scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
 
+    # scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
     returns = scores.unsqueeze(-1) * response_mask
     return returns, returns
 
@@ -380,6 +382,7 @@ def compute_policy_loss(
             a float number indicating the mean entropy loss
 
     """
+    # breakpoint()
     negative_approx_kl = log_probs - old_log_probs
     # clamp negative_approx_kl to avoid nan kld
     negative_approx_kl = torch.clamp(negative_approx_kl, -20.0, 20.0)

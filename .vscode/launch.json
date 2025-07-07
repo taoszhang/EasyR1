@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Debug Qwen2.5-VL-7B-Instruct",
+            "type": "python",
+            "request": "launch",
+            "module": "verl.trainer.main",  // 替换为你的 main.py 文件的实际路径
+            "args": [
+                "config=examples/config_test.yaml",
+                "data.train_files=hiyouga/geometry3k@train",
+                "data.val_files=hiyouga/geometry3k@test",
+                "data.system_prompt=You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\nThe reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put in \\boxed{}.",
+                "worker.actor.model.model_path=/data/tzhang/model/Qwen2.5-VL-7B-Instruct",
+                "worker.rollout.enable_chunked_prefill=false",
+                "trainer.experiment_name=qwen2_5_vl_7b_geo_grpo",
+                "trainer.n_gpus_per_node=4"
+            ],
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3"
+            }
+        }
+    ]
+}

@@ -114,6 +114,9 @@ def main():
     ppo_config: PPOConfig = OmegaConf.to_object(ppo_config)
     ppo_config.deep_post_init()
 
+    # if not ray.is_initialized():
+    #     # this is for local ray cluster
+    #     ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
     if not ray.is_initialized():
         runtime_env = {
             "env_vars": {
